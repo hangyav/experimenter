@@ -4,6 +4,8 @@ from __future__ import print_function
 
 from experimenter.task import TaskDefinition
 
+main = 'Task1'
+
 ##############################################################
 task1 = TaskDefinition(
     name='Task1',

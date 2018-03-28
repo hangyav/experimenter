@@ -30,7 +30,7 @@ if __name__ == '__main__':
     file = os.path.abspath(file)
 
     task_pool = TaskPool.init_from_py(file)
-    task_pool.named_tasks['Task1'].create_instance(task_pool).execute()
+    task_pool.execute()
 
     # except BaseException as e:
     #     print(e)

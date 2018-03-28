@@ -10,7 +10,10 @@ main = 'Task1'
 task1 = TaskDefinition(
     name='Task1',
     actions=['echo TASK1'],
-    dependencies=['Task2', 'task3_param2-300_param3-asdqwe_end']
+    dependencies=['Task2',
+                  'task3_param2-300_param3-asdqwe_end',
+                  'examples/example.py'
+                  ]
 )
 
 task2 =  TaskDefinition(

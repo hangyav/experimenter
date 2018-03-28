@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import logging
 import re
+import os
 from experimenter.executor import CliExecutor
 
 
@@ -11,7 +12,8 @@ logger = logging.getLogger(__name__)
 
 class TaskDefinition:
 
-    def __init__(self, actions, name=None, params=None, patterns=None, dependencies=None, executor=CliExecutor):
+    def __init__(self, actions, name=None, params=None, patterns=None, dependencies=None, executor=CliExecutor,
+                 outputs=None):
         if len(actions) == 0 and len(dependencies) == 0:
             raise ValueError('At least one action or one dependencie has to be defined!')
 
@@ -26,6 +28,7 @@ class TaskDefinition:
         self.patterns = patterns
         self.dependencies = dependencies
         self.executor = executor
+        self.outputs = outputs
 
     def create_instance(self, pool, pattern=None):
         params = self.params
@@ -37,7 +40,7 @@ class TaskDefinition:
             for name, value in match.groupdict().items():
                 params[name] = value
 
-
+        ##########################################################
         dependencies = list()
         if self.dependencies is not None:
             for dep in self.dependencies:
@@ -52,17 +55,37 @@ class TaskDefinition:
                     dep_task = pool.named_tasks[dep]
 
                 if dep_task is None:
-                    # TODO handle file deps without tasks
-                    raise NotImplementedError()
+                    if not os.path.exists(dep):
+                        raise ValueError('File dependency does not exists: {}'.format(dep))
+                    continue
 
-                dependencies.append(dep_task.create_instance(pool, pattern=(dep, pattern)))
+                ##########################################################
+                dep_instance = dep_task.create_instance(pool, pattern=(dep, pattern))
+                if dep_instance is not None:
+                    dependencies.append(dep_instance)
 
+        ##########################################################
         tasks = list()
         if self.actions is not None:
             for task in self.actions:
                 tasks.append(self.executor(task.format(**params)))
 
+        if self.dependencies is not None and len(self.dependencies) > 0 and \
+                        len(dependencies) == 0 and not self._is_output_exists():
+            logger.info('All dependencies are satisfied. Ignoring task.')
+            return None
+
         return TaskInstance(tasks, dependencies)
+
+    def _is_output_exists(self):
+        if self.outputs is None:
+            return True
+
+        for o in self.outputs:
+            if not os.path.exists(o):
+                return False
+
+        return True
 
 class TaskInstance:
 

@@ -2,6 +2,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import sys
+import subprocess
+
 import logging
 logger = logging.getLogger(__name__)
 
@@ -12,5 +15,5 @@ class CliExecutor:
         self.command = command
 
     def execute(self):
-        print(self.command)
-        raise NotImplementedError()
+        print('Running command: {}'.format(self.command))
+        subprocess.run(args=[self.command], shell=True, stdout=sys.stdout, stderr=sys.stderr)

@@ -15,6 +15,7 @@ def getArguments():
   parser = argparse.ArgumentParser()
 
   parser.add_argument('-f', '--file', type=str, default='experiment.py', help='File that contains tasks.')
+  parser.add_argument('-m', '--main', type=str, default=None, nargs='*', help='Tasks to execute')
 
   return parser.parse_args()
 
@@ -30,6 +31,11 @@ if __name__ == '__main__':
     file = os.path.abspath(file)
 
     task_pool = TaskPool.init_from_py(file)
+
+    main = args.main
+    if main is not None:
+        task_pool.main = main
+
     task_pool.execute()
 
     # except BaseException as e:

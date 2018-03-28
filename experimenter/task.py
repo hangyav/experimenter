@@ -27,27 +27,40 @@ class TaskDefinition:
         self.dependencies = dependencies
         self.executor = executor
 
-    def create_instance(self, pool, name=None):
-        if name is not None:
-            # TODO handle additional params
-            raise NotImplementedError()
+    def create_instance(self, pool, pattern=None):
+        params = self.params
+        if params is None:
+            params = dict()
+
+        if pattern is not None and pattern[1] is not None:
+            match = re.search(pattern[1], pattern[0])
+            for name, value in match.groupdict().items():
+                params[name] = value
+
 
         dependencies = list()
         if self.dependencies is not None:
             for dep in self.dependencies:
-                dep = dep.format(**self.params)
-                dep_task = pool.lookup_task_by_pattern(dep)
+                dep = dep.format(**params)
+                dep_task = None
+                pattern = None
+                tmp = pool.lookup_task_by_pattern(dep)
+                if tmp is not None:
+                    dep_task = tmp[0]
+                    pattern = tmp[1]
+                if dep_task is None and dep in pool.named_tasks: #look for the exact task name
+                    dep_task = pool.named_tasks[dep]
 
                 if dep_task is None:
                     # TODO handle file deps without tasks
                     raise NotImplementedError()
 
-                dependencies.append(dep_task.create_instance(pool, name=dep))
+                dependencies.append(dep_task.create_instance(pool, pattern=(dep, pattern)))
 
         tasks = list()
         if self.actions is not None:
             for task in self.actions:
-                tasks.append(self.executor(task.format(**self.params)))
+                tasks.append(self.executor(task.format(**params)))
 
         return TaskInstance(tasks, dependencies)
 
@@ -64,22 +77,24 @@ class TaskInstance:
         for dep in self.dependecies:
             dep.execute()
 
+        print('====================================')
         for task in self.tasks:
             task.execute()
 
 
 class TaskPool:
 
-    def __init__(self, tasks):
+    def __init__(self, tasks, main=None):
         self.tasks = tasks
         self.named_tasks = {task.name: task for task in tasks if task.name is not None}
+        self.main = main
 
         self._patterns = list()
         for task in tasks:
-            if task.dependencies is None:
+            if task.patterns is None:
                 continue
 
-            for dep in task.dependencies:
+            for dep in task.patterns:
                 self._patterns.append((re.compile(dep), task))
 
     @staticmethod
@@ -94,10 +109,13 @@ class TaskPool:
             importer(fin.read())
 
         tasks = [var for name, var in locals().items() if isinstance(var, TaskDefinition)]
-        return TaskPool(tasks)
+        main_task = None
+        if 'main' in locals():
+            main_task = locals()['main']
+        return TaskPool(tasks, main=main_task)
 
     def lookup_task_by_pattern(self, name):
-        found = [task for pattern, task in self._patterns if pattern.match(name) is not None]
+        found = [(task, pattern) for pattern, task in self._patterns if pattern.match(name) is not None]
 
         if len(found) > 1:
             raise ValueError('{} matched multiple times: {}'.format(name, ', '.join([task.name for task in found])))
@@ -105,3 +123,29 @@ class TaskPool:
         if len(found) == 0:
             return None
         return found[0]
+
+    def _get_actual_tasks(self, tasks):
+        res = list()
+
+        if not isinstance(tasks, list):
+            tasks = [tasks]
+
+        for item in tasks:
+            if isinstance(item, TaskDefinition):
+                res.append(item)
+            elif isinstance(item, str):
+                res.append(self.named_tasks[item])
+            else:
+                raise ValueError('Invalid task: {}'.format(item))
+
+        return res
+
+    def execute(self, task=None):
+        if task is None:
+            task = self.main
+
+            if task is None:
+                raise ValueError('No main task is set!')
+
+        for t in self._get_actual_tasks(task):
+            t.create_instance(self).execute()

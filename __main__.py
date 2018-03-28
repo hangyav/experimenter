@@ -29,21 +29,8 @@ if __name__ == '__main__':
         raise ValueError('{} does not exists!'.format(file))
     file = os.path.abspath(file)
 
-    #############################################################################################
-
-    task1 = TaskDefinition(
-        name='Task1',
-        actions=['echo TASK1']
-    )
-
-
-    task_pool = TaskPool([task1])
-
-    task_pool.named_tasks[task1.name].create_instance(task_pool).execute()
-
-    #############################################################################################
-
-    # task_pool = TaskPool.init_from_py(file)
+    task_pool = TaskPool.init_from_py(file)
+    task_pool.named_tasks['Task1'].create_instance(task_pool).execute()
 
     # except BaseException as e:
     #     print(e)

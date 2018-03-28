@@ -84,17 +84,16 @@ class TaskPool:
 
     @staticmethod
     def init_from_py(file):
-        raise NotImplementedError()
-        # import sys
-        # if sys.version_info[0] == 2:
-        #     exec = execFile
-        exec(file)
+        import sys
+        if sys.version_info[0] == 2:
+            importer = execFile
+        else:
+            importer = exec
 
-        # import importlib
-        # module = importlib.import_module(file)
+        with open(file, 'r') as fin:
+            importer(fin.read())
 
-        tasks = [var for name, var in globals().items() if isinstance(var, TaskDefinition)]
-
+        tasks = [var for name, var in locals().items() if isinstance(var, TaskDefinition)]
         return TaskPool(tasks)
 
     def lookup_task_by_pattern(self, name):

@@ -4,7 +4,7 @@ from __future__ import print_function
 
 from experimenter.task import TaskDefinition
 
-main = 'Task1'
+main = 'FTask1'
 
 ##############################################################
 task1 = TaskDefinition(
@@ -37,4 +37,36 @@ task3 =  TaskDefinition(
 task4 = TaskDefinition(
     patterns=['task4_times-(?P<times>[0-9]+)'],
     actions=['echo TASK4 {times}']
+)
+
+##############################################################
+
+ftask1 = TaskDefinition(
+    name='FTask1',
+    params={
+            'out': 'FTask1.txt2',
+        },
+    actions=['cat tmp/{out}'],
+    dependencies=['tmp/{out}']
+)
+
+ftask2 = TaskDefinition(
+    patterns=['tmp/(?P<file>[^ ]+).txt'],
+    actions=['touch tmp/{file}.txt', 'echo "asdqwe" > tmp/{file}.txt'],
+    dependencies=['tmp/'],
+    outputs=['tmp/{file}.txt']
+)
+
+
+ftask3 = TaskDefinition(
+    patterns=['(?P<dir>[a-zA-Z/]+)/'],
+    actions=['mkdir -p {dir}'],
+    outputs=['{dir}/']
+)
+
+ftask4 = TaskDefinition(
+    patterns=['tmp/(?P<file>[^ ]+).txt2'],
+    actions=['cat tmp/{file}.txt > tmp/{file}.txt2', 'cat tmp/{file}.txt >> tmp/{file}.txt2'],
+    dependencies=['tmp/{file}.txt'],
+    outputs=['tmp/{file}.txt2']
 )

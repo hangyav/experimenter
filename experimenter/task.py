@@ -15,7 +15,7 @@ class TaskDefinition:
     def __init__(self, actions, name=None, params=None, patterns=None, dependencies=None, executor=CliExecutor,
                  outputs=None):
         if len(actions) == 0 and len(dependencies) == 0:
-            raise ValueError('At least one action or one dependencie has to be defined!')
+            raise ValueError('At least one action or one dependency has to be defined!')
 
         if patterns is None and name is None:
             raise ValueError('Name or pattern has to be defined!')
@@ -30,6 +30,9 @@ class TaskDefinition:
         self.executor = executor
         self.outputs = outputs
 
+    def __str__(self):
+        return '{}: {}'.format(self.name, self.params)
+
     def create_instance(self, pool, pattern=None):
         params = self.params
         if params is None:
@@ -42,6 +45,7 @@ class TaskDefinition:
 
         ##########################################################
         dependencies = list()
+        latest_parent_modification = -1.0
         if self.dependencies is not None:
             for dep in self.dependencies:
                 dep = dep.format(**params)
@@ -61,8 +65,10 @@ class TaskDefinition:
 
                 ##########################################################
                 dep_instance = dep_task.create_instance(pool, pattern=(dep, pattern))
-                if dep_instance is not None:
-                    dependencies.append(dep_instance)
+                if dep_instance[0] is not None:
+                    dependencies.append(dep_instance[0])
+                if dep_instance[1] is not None:
+                    latest_parent_modification = max(latest_parent_modification, dep_instance[1])
 
         ##########################################################
         tasks = list()
@@ -70,30 +76,66 @@ class TaskDefinition:
             for task in self.actions:
                 tasks.append(self.executor(task.format(**params)))
 
-        if self.dependencies is not None and len(self.dependencies) > 0 and \
-                        len(dependencies) == 0 and not self._is_output_exists():
+        outputs = list()
+        if self.outputs is not None:
+            outputs = [o.format(**params) for o in self.outputs]
+
+        earliest_modification = self._earliest_output_modification_time(outputs)
+        if len(dependencies) > 0:
+            return (TaskInstance(tasks, dependencies, self), self._latest_output_modification_time(outputs))
+        elif self.dependencies is not None and len(self.dependencies) > 0 and len(dependencies) == 0 \
+                and len(outputs) > 0 and self._is_output_exists(outputs) and latest_parent_modification > -1.0 and latest_parent_modification <= earliest_modification:
             logger.info('All dependencies are satisfied. Ignoring task.')
-            return None
+            return (None, self._latest_output_modification_time(outputs))
+        elif self.dependencies is None and len(outputs) > 0 and self._is_output_exists(outputs):
+            logger.info('All outputs are satisfied. Ignoring task.')
+            return (None, self._latest_output_modification_time(outputs))
 
-        return TaskInstance(tasks, dependencies)
+        return (TaskInstance(tasks, dependencies, self), self._latest_output_modification_time(outputs))
 
-    def _is_output_exists(self):
-        if self.outputs is None:
+    @staticmethod
+    def _is_output_exists(outputs):
+        if outputs is None or len(outputs) == 0:
             return True
 
-        for o in self.outputs:
+        for o in outputs:
             if not os.path.exists(o):
                 return False
 
         return True
 
+    @staticmethod
+    def _output_modification_time(outputs, func):
+        if outputs is None or len(outputs) == 0:
+            return None
+
+        o = outputs[0]
+        res = None
+        if os.path.exists(o):
+            res = os.path.getmtime(o)
+        for o in outputs[1:]:
+            if os.path.exists(o):
+                res = func(res, os.path.getmtime(o))
+
+        return res
+
+    @staticmethod
+    def _earliest_output_modification_time(outputs):
+        return TaskDefinition._output_modification_time(outputs, min)
+
+    @staticmethod
+    def _latest_output_modification_time(outputs):
+        return TaskDefinition._output_modification_time(outputs, max)
+
+
 class TaskInstance:
 
-    def __init__(self, tasks, dependencies):
+    def __init__(self, tasks, dependencies, definition):
         assert len(tasks) > 0 or len(dependencies) > 0, 'Error no task nor dependency for task instance!'
 
         self.tasks = tasks
         self.dependecies = dependencies
+        self.definition = definition
 
     def execute(self):
 
@@ -118,7 +160,7 @@ class TaskPool:
                 continue
 
             for dep in task.patterns:
-                self._patterns.append((re.compile(dep), task))
+                self._patterns.append((re.compile('^{}$'.format(dep)), task))
 
     @staticmethod
     def init_from_py(file):
@@ -141,7 +183,7 @@ class TaskPool:
         found = [(task, pattern) for pattern, task in self._patterns if pattern.match(name) is not None]
 
         if len(found) > 1:
-            raise ValueError('{} matched multiple times: {}'.format(name, ', '.join([task.name for task in found])))
+            raise ValueError('{} matched multiple times: {}'.format(name, ', '.join([task.__str__() for task, _ in found])))
 
         if len(found) == 0:
             return None
@@ -171,4 +213,6 @@ class TaskPool:
                 raise ValueError('No main task is set!')
 
         for t in self._get_actual_tasks(task):
-            t.create_instance(self).execute()
+            task = t.create_instance(self)
+            if task is not None:
+                task[0].execute()

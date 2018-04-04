@@ -87,7 +87,7 @@ class TaskDefinition:
 
         earliest_modification = self._earliest_output_modification_time(outputs)
         if len(dependencies) > 0:
-            return (TaskInstance(tasks, dependencies, self), self._latest_output_modification_time(outputs))
+            pass
         elif self.dependencies is not None and len(self.dependencies) > 0 and len(dependencies) == 0 \
                 and len(outputs) > 0 and self._is_output_exists(outputs) and latest_parent_modification > -1.0 and latest_parent_modification <= earliest_modification:
             logger.info('All dependencies are satisfied. Ignoring task.')
@@ -224,7 +224,10 @@ class TaskPool:
             if task is None:
                 raise ValueError('No main task is set!')
 
+        delays = list()
         for t in self._get_actual_tasks(task):
             task = t.create_instance(self)
             if task is not None:
-                task[0].execute(self).compute(num_workers=self.num_workers)
+                delays.append(task[0].execute(self))
+
+        dask.compute(*delays, num_workers=self.num_workers)

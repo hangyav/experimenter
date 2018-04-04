@@ -28,6 +28,15 @@ class CliExecutor:
 
         return res
 
+    def __eq__(self, other):
+        if isinstance(other, CliExecutor):
+            return ';'.join(self.commands) == ';'.join(other.commands)
+
+        return False
+
+    def __hash__(self):
+        return ';'.join(self.commands).__hash__()
+
 
 class DummyExecutor:
 

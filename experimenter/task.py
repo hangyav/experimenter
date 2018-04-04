@@ -142,12 +142,17 @@ class TaskInstance:
         self.dependecies = dependencies
         self.definition = definition
 
-    def execute(self):
+    def execute(self, pool):
 
-        dep_delays = [dep.execute() for dep in self.dependecies]
+        dep_delays = [dep.execute(pool) for dep in self.dependecies]
 
         if self.task is not None:
-            return dask.delayed(self.task.execute)(dependencies=dep_delays)
+            d = dask.delayed(self.task.execute)(dependencies=dep_delays)
+            if self.task in pool.task_instances:
+                d = pool.task_instances[self.task]
+            else:
+                pool.task_instances[self.task] = d
+            return d
         else:
             return dask.delayed(DummyExecutor().execute)(dependencies=dep_delays)
 
@@ -159,6 +164,7 @@ class TaskPool:
         self.named_tasks = {task.name: task for task in tasks if task.name is not None}
         self.main = main
         self.num_workers = num_workers
+        self.task_instances = dict()
 
         self._patterns = list()
         for task in tasks:
@@ -221,4 +227,4 @@ class TaskPool:
         for t in self._get_actual_tasks(task):
             task = t.create_instance(self)
             if task is not None:
-                task[0].execute().compute(num_workers=self.num_workers)
+                task[0].execute(self).compute(num_workers=self.num_workers)

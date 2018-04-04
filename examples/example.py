@@ -4,7 +4,7 @@ from __future__ import print_function
 
 from experimenter.task import TaskDefinition
 
-main = 'PTask1'
+main = 'CTask1'
 
 ##############################################################
 task1 = TaskDefinition(
@@ -80,5 +80,5 @@ ptask2 = TaskDefinition(
 
 ptask1 = TaskDefinition(
     name='PTask1',
-    dependencies=['echo_{}'.format(i) for i in range(10)]
+    dependencies=['echo_{}'.format(i) for i in range(10)] + ['echo_{}'.format(i) for i in range(10)]
 )

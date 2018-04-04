@@ -15,7 +15,8 @@ def getArguments():
   parser = argparse.ArgumentParser()
 
   parser.add_argument('-f', '--file', type=str, default='experiment.py', help='File that contains tasks.')
-  parser.add_argument('-m', '--main', type=str, default=None, nargs='*', help='Tasks to execute')
+  parser.add_argument('-m', '--main', type=str, default=None, nargs='*', help='Tasks to execute.')
+  parser.add_argument('-t', '--threads', type=int, default=1, help='Number of threads to Use.')
 
   return parser.parse_args()
 
@@ -31,6 +32,7 @@ if __name__ == '__main__':
     file = os.path.abspath(file)
 
     task_pool = TaskPool.init_from_py(file)
+    task_pool.num_workers = args.threads
 
     main = args.main
     if main is not None:

@@ -5,16 +5,18 @@ from __future__ import print_function
 import logging
 import re
 import os
-from experimenter.executor import CliExecutor
+import dask
+
+from experimenter.executor import CliExecutor, DummyExecutor
 
 
 logger = logging.getLogger(__name__)
 
 class TaskDefinition:
 
-    def __init__(self, actions, name=None, params=None, patterns=None, dependencies=None, executor=CliExecutor,
+    def __init__(self, actions=None, name=None, params=None, patterns=None, dependencies=None, executor=CliExecutor,
                  outputs=None):
-        if len(actions) == 0 and len(dependencies) == 0:
+        if (actions is None or len(actions) == 0) and len(dependencies) == 0:
             raise ValueError('At least one action or one dependency has to be defined!')
 
         if patterns is None and name is None:
@@ -71,10 +73,13 @@ class TaskDefinition:
                     latest_parent_modification = max(latest_parent_modification, dep_instance[1])
 
         ##########################################################
-        tasks = list()
+        # tasks = list()
+        # if self.actions is not None:
+        #     for task in self.actions:
+        #         tasks.append(self.executor(task.format(**params)))
+        tasks = None
         if self.actions is not None:
-            for task in self.actions:
-                tasks.append(self.executor(task.format(**params)))
+            tasks = self.executor([task.format(**params) for task in self.actions])
 
         outputs = list()
         if self.outputs is not None:
@@ -130,29 +135,30 @@ class TaskDefinition:
 
 class TaskInstance:
 
-    def __init__(self, tasks, dependencies, definition):
-        assert len(tasks) > 0 or len(dependencies) > 0, 'Error no task nor dependency for task instance!'
+    def __init__(self, task, dependencies, definition):
+        assert (task is not None and len(task.commands) > 0) or len(dependencies) > 0, 'Error no task nor dependency for task instance!'
 
-        self.tasks = tasks
+        self.task = task
         self.dependecies = dependencies
         self.definition = definition
 
     def execute(self):
 
-        for dep in self.dependecies:
-            dep.execute()
+        dep_delays = [dep.execute() for dep in self.dependecies]
 
-        print('====================================')
-        for task in self.tasks:
-            task.execute()
+        if self.task is not None:
+            return dask.delayed(self.task.execute)(dependencies=dep_delays)
+        else:
+            return dask.delayed(DummyExecutor().execute)(dependencies=dep_delays)
 
 
 class TaskPool:
 
-    def __init__(self, tasks, main=None):
+    def __init__(self, tasks, main=None, num_workers=1):
         self.tasks = tasks
         self.named_tasks = {task.name: task for task in tasks if task.name is not None}
         self.main = main
+        self.num_workers = num_workers
 
         self._patterns = list()
         for task in tasks:
@@ -215,4 +221,4 @@ class TaskPool:
         for t in self._get_actual_tasks(task):
             task = t.create_instance(self)
             if task is not None:
-                task[0].execute()
+                task[0].execute().compute(num_workers=self.num_workers)

@@ -4,7 +4,7 @@ from __future__ import print_function
 
 from experimenter.task import TaskDefinition
 
-main = 'FTask1'
+main = 'PTask1'
 
 ##############################################################
 task1 = TaskDefinition(
@@ -69,4 +69,16 @@ ftask4 = TaskDefinition(
     actions=['cat tmp/{file}.txt > tmp/{file}.txt2', 'cat tmp/{file}.txt >> tmp/{file}.txt2'],
     dependencies=['tmp/{file}.txt'],
     outputs=['tmp/{file}.txt2']
+)
+
+##############################################################
+
+ptask2 = TaskDefinition(
+    patterns=['echo_(?P<text>[a-zA-Z0-9/]+)'],
+    actions=['echo {text}']
+)
+
+ptask1 = TaskDefinition(
+    name='PTask1',
+    dependencies=['echo_{}'.format(i) for i in range(10)]
 )

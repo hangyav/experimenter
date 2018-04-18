@@ -18,9 +18,9 @@ class CliExecutor:
     def execute(self, dependencies=None):
         res = list()
 
-        print('====================================')
+        print('\033[1m\033[91m====================================\033[0m')
         for command in self.commands:
-            print('Running command: {}'.format(command))
+            print('\033[1m\033[1;33mRunning command: \033[0m\033[0;33m{}\033[0m'.format(command))
             p = subprocess.run(args=[command], shell=True, stdout=sys.stdout, stderr=sys.stderr)
             if p.returncode != 0:
                 raise RuntimeError('Failure in command: {}'.format(p))

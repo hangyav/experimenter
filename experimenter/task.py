@@ -42,6 +42,7 @@ class TaskDefinition:
 
         if pattern is not None and pattern[1] is not None:
             match = re.search(pattern[1], pattern[0])
+            params['MATCH'] = pattern[0]
             for name, value in match.groupdict().items():
                 params[name] = value
 
@@ -50,7 +51,7 @@ class TaskDefinition:
         latest_parent_modification = -1.0
         if self.dependencies is not None:
             for dep in self.dependencies:
-                dep = dep.format(**params)
+                dep = TaskDefinition._get_param(dep, params)
                 dep_task = None
                 pattern = None
                 tmp = pool.lookup_task_by_pattern(dep)
@@ -73,23 +74,27 @@ class TaskDefinition:
                     latest_parent_modification = max(latest_parent_modification, dep_instance[1])
 
         ##########################################################
-        # tasks = list()
-        # if self.actions is not None:
-        #     for task in self.actions:
-        #         tasks.append(self.executor(task.format(**params)))
         tasks = None
         if self.actions is not None:
-            tasks = self.executor([task.format(**params) for task in self.actions])
+            tasks = self.executor([TaskDefinition._get_param(task, params) for task in self.actions])
+
+        ##########################################################
 
         outputs = list()
         if self.outputs is not None:
-            outputs = [o.format(**params) for o in self.outputs]
+            outputs = [TaskDefinition._get_param(o, params) for o in self.outputs]
+
+        #########################################################
 
         earliest_modification = self._earliest_output_modification_time(outputs)
         if len(dependencies) > 0:
             pass
         elif self.dependencies is not None and len(self.dependencies) > 0 and len(dependencies) == 0 \
                 and len(outputs) > 0 and self._is_output_exists(outputs) and latest_parent_modification > -1.0 and latest_parent_modification <= earliest_modification:
+            logger.info('All dependencies are satisfied. Ignoring task.')
+            return (None, self._latest_output_modification_time(outputs))
+        elif self.dependencies is not None and len(self.dependencies) > 0 and len(dependencies) == 0 \
+                and len(outputs) == 0:
             logger.info('All dependencies are satisfied. Ignoring task.')
             return (None, self._latest_output_modification_time(outputs))
         elif self.dependencies is None and len(outputs) > 0 and self._is_output_exists(outputs):
@@ -110,6 +115,12 @@ class TaskDefinition:
         return True
 
     @staticmethod
+    def _getmtime(x):
+        if os.path.isdir(x):
+            return None
+        return os.path.getmtime(x)
+
+    @staticmethod
     def _output_modification_time(outputs, func):
         if outputs is None or len(outputs) == 0:
             return None
@@ -117,12 +128,19 @@ class TaskDefinition:
         o = outputs[0]
         res = None
         if os.path.exists(o):
-            res = os.path.getmtime(o)
+            res = TaskDefinition._getmtime(o)
         for o in outputs[1:]:
             if os.path.exists(o):
-                res = func(res, os.path.getmtime(o))
+                res = func(res, TaskDefinition._getmtime(o))
 
         return res
+
+    @staticmethod
+    def _get_param(x, params):
+        if type(x) == tuple:
+            return x[0](*[v.format(**params) for v in x[1:]])
+
+        return x.format(**params)
 
     @staticmethod
     def _earliest_output_modification_time(outputs):
@@ -227,7 +245,7 @@ class TaskPool:
         delays = list()
         for t in self._get_actual_tasks(task):
             task = t.create_instance(self)
-            if task is not None:
+            if task[0] is not None:
                 delays.append(task[0].execute(self))
 
         dask.compute(*delays, num_workers=self.num_workers)

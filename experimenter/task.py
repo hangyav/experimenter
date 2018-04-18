@@ -5,6 +5,7 @@ from __future__ import print_function
 import logging
 import re
 import os
+import shutil
 import dask
 
 from experimenter.executor import CliExecutor, DummyExecutor
@@ -101,7 +102,7 @@ class TaskDefinition:
             logger.info('All outputs are satisfied. Ignoring task.')
             return (None, self._latest_output_modification_time(outputs))
 
-        return (TaskInstance(tasks, dependencies, self), self._latest_output_modification_time(outputs))
+        return (TaskInstance(tasks, dependencies, self, pool, outputs), self._latest_output_modification_time(outputs))
 
     @staticmethod
     def _is_output_exists(outputs):
@@ -153,26 +154,44 @@ class TaskDefinition:
 
 class TaskInstance:
 
-    def __init__(self, task, dependencies, definition):
+    def __init__(self, task, dependencies, definition, pool, outputs):
         assert (task is not None and len(task.commands) > 0) or len(dependencies) > 0, 'Error no task nor dependency for task instance!'
 
         self.task = task
         self.dependecies = dependencies
         self.definition = definition
+        self.pool = pool
+        self.outputs = outputs
 
-    def execute(self, pool):
+    def execute(self):
 
-        dep_delays = [dep.execute(pool) for dep in self.dependecies]
+        dep_delays = [dep.execute() for dep in self.dependecies]
 
         if self.task is not None:
-            d = dask.delayed(self.task.execute)(dependencies=dep_delays)
-            if self.task in pool.task_instances:
-                d = pool.task_instances[self.task]
+            d = dask.delayed(self.task.execute)(self, dependencies=dep_delays)
+            if self.task in self.pool.task_instances:
+                d = self.pool.task_instances[self.task]
             else:
-                pool.task_instances[self.task] = d
+                self.pool.task_instances[self.task] = d
             return d
         else:
             return dask.delayed(DummyExecutor().execute)(dependencies=dep_delays)
+
+    def started(self):
+        self.pool.active_tasks.add(self)
+
+    def stoped(self):
+        self.pool.active_tasks.remove(self)
+
+    def recover(self):
+        if self.outputs is not None:
+            for o in self.outputs:
+                if os.path.exists(o):
+                    logger.warning('Removing non-finished output: {}'.format(o))
+                    if os.path.isdir(o):
+                        shutil.rmtree(o)
+                    else:
+                        os.remove(o)
 
 
 class TaskPool:
@@ -183,6 +202,8 @@ class TaskPool:
         self.main = main
         self.num_workers = num_workers
         self.task_instances = dict()
+
+        self.active_tasks = None
 
         self._patterns = list()
         for task in tasks:
@@ -246,6 +267,16 @@ class TaskPool:
         for t in self._get_actual_tasks(task):
             task = t.create_instance(self)
             if task[0] is not None:
-                delays.append(task[0].execute(self))
+                delays.append(task[0].execute())
 
-        dask.compute(*delays, num_workers=self.num_workers)
+        try:
+            self.active_tasks = set()
+            dask.compute(*delays, num_workers=self.num_workers)
+        except BaseException as e:
+            self.handle_error()
+            self.active_tasks = None
+            raise e
+
+    def handle_error(self):
+        for task in self.active_tasks:
+            task.recover()

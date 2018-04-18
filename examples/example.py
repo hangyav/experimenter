@@ -4,7 +4,7 @@ from __future__ import print_function
 
 from experimenter.task import TaskDefinition
 
-main = 'PTask1'
+main = 'ERRORTASK1'
 
 ##############################################################
 task1 = TaskDefinition(
@@ -81,4 +81,18 @@ ptask2 = TaskDefinition(
 ptask1 = TaskDefinition(
     name='PTask1',
     dependencies=['echo_{}'.format(i) for i in range(10)] + ['echo_{}'.format(i) for i in range(10)]
+)
+
+##############################################################
+
+errortask1 = TaskDefinition(
+    name='ERRORTASK1',
+    outputs=['tmp/error1.txt', 'tmp/error2.txt'],
+    actions=[
+        'mkdir -p tmp',
+        'touch tmp/error1.txt',
+        'sleep 1m',
+        'exit 1',
+        'touch tmp/error2.txt',
+    ]
 )

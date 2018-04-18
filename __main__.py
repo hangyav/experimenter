@@ -6,6 +6,7 @@ import argparse
 import logging
 import os
 import sys
+import signal
 
 from experimenter.task import TaskPool
 
@@ -37,6 +38,14 @@ if __name__ == '__main__':
 
         task_pool = TaskPool.init_from_py(file)
         task_pool.num_workers = args.threads
+
+        def signal_handler(signal, frame):
+            logger.error('Signal handler called with signal: {}'.format(signal))
+            task_pool.handle_error()
+            sys.exit(1)
+
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
 
         main = args.main
         if main is not None:

@@ -88,18 +88,30 @@ class TaskDefinition:
         #########################################################
 
         earliest_modification = self._earliest_output_modification_time(outputs)
-        if len(dependencies) > 0:
+        if earliest_modification is None:
+            earliest_modification = -1.0
+        # if len(dependencies) > 0:
+        #     pass
+        # elif self.dependencies is not None and len(self.dependencies) > 0 and len(dependencies) == 0 \
+        #         and len(outputs) > 0 and self._is_output_exists(outputs) and latest_parent_modification > -1.0 and latest_parent_modification <= earliest_modification:
+        #     logger.info('All dependencies are satisfied. Ignoring task.')
+        #     return (None, self._latest_output_modification_time(outputs))
+        # elif self.dependencies is not None and len(self.dependencies) > 0 and len(dependencies) == 0 \
+        #         and len(outputs) == 0:
+        #     logger.info('All dependencies are satisfied. Ignoring task.')
+        #     return (None, self._latest_output_modification_time(outputs))
+        # elif self.dependencies is None and len(outputs) > 0 and self._is_output_exists(outputs):
+        #     logger.info('All outputs are satisfied. Ignoring task.')
+        #     return (None, self._latest_output_modification_time(outputs))
+
+        if len(outputs) > 0 and not self._is_output_exists(outputs):
             pass
-        elif self.dependencies is not None and len(self.dependencies) > 0 and len(dependencies) == 0 \
-                and len(outputs) > 0 and self._is_output_exists(outputs) and latest_parent_modification > -1.0 and latest_parent_modification <= earliest_modification:
-            logger.info('All dependencies are satisfied. Ignoring task.')
-            return (None, self._latest_output_modification_time(outputs))
-        elif self.dependencies is not None and len(self.dependencies) > 0 and len(dependencies) == 0 \
-                and len(outputs) == 0:
-            logger.info('All dependencies are satisfied. Ignoring task.')
-            return (None, self._latest_output_modification_time(outputs))
-        elif self.dependencies is None and len(outputs) > 0 and self._is_output_exists(outputs):
-            logger.info('All outputs are satisfied. Ignoring task.')
+        elif len(dependencies) > 0:
+            pass
+        elif len(outputs) > 0 and latest_parent_modification > earliest_modification:
+            pass
+        else:
+            logger.info('All dependencies and outputs are satisfied for task: {}'.format(self))
             return (None, self._latest_output_modification_time(outputs))
 
         return (TaskInstance(tasks, dependencies, self, pool, outputs), self._latest_output_modification_time(outputs))
@@ -270,6 +282,7 @@ class TaskPool:
                 delays.append(task[0].execute())
 
         try:
+            print('\033[1m\033[91mNumber of tasks to run: {}\033[0m'.format(len(self.task_instances)))
             self.active_tasks = set()
             dask.compute(*delays, num_workers=self.num_workers)
         except BaseException as e:

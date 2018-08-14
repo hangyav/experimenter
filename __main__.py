@@ -10,9 +10,6 @@ import signal
 
 from experimenter.task import TaskPool
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 def getArguments():
   parser = argparse.ArgumentParser()
 
@@ -20,16 +17,28 @@ def getArguments():
   parser.add_argument('-m', '--main', type=str, default=None, nargs='*', help='Tasks to execute.')
   parser.add_argument('-t', '--threads', type=int, default=1, help='Number of threads to Use.')
   parser.add_argument('--debug', type=int, default=0, help='Debug mode.')
+  parser.add_argument('--log-level', type=str, default='WARNING', help='{NOTSET|DEBUNG|INFO|WARNING|ERROR|CRITICAL}')
 
   return parser.parse_args()
 
 
+
+
 if __name__ == '__main__':
-    debug = 0
+    args = getArguments()
+    debug = args.debug
+    log_level = args.log_level.upper()
+
+    if log_level not in logging._nameToLevel.keys():
+        sys.stderr.write('{} is not a valid logging level!\n'.format(log_level))
+        sys.exit(1)
+
+    logging.basicConfig(level=logging._nameToLevel[log_level])
+    logger = logging.getLogger(__name__)
+
     try:
 
-        args = getArguments()
-        debug = args.debug
+
 
         file = args.file
         if not os.path.exists(file):

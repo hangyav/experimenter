@@ -4,7 +4,7 @@ from __future__ import print_function
 
 from experimenter.task import TaskDefinition
 
-main = 'ERRORTASK1'
+main = 'FTask1'
 
 ##############################################################
 task1 = TaskDefinition(

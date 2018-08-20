@@ -260,9 +260,15 @@ class TaskPool:
 
         for item in tasks:
             if isinstance(item, TaskDefinition):
-                res.append(item)
+                res.append(item.create_instance(self))
             elif isinstance(item, str):
-                res.append(self.named_tasks[item])
+                if item in self.named_tasks:
+                    res.append(self.named_tasks[item].create_instance(self))
+                else:
+                    task = self.lookup_task_by_pattern(item)
+                    if task is None:
+                        raise ValueError('No such task: {}'.format(item))
+                    res.append(task[0].create_instance(self, pattern=(item, task[1])))
             else:
                 raise ValueError('Invalid task: {}'.format(item))
 
@@ -276,8 +282,7 @@ class TaskPool:
                 raise ValueError('No main task is set!')
 
         delays = list()
-        for t in self._get_actual_tasks(task):
-            task = t.create_instance(self)
+        for task in self._get_actual_tasks(task):
             if task[0] is not None:
                 delays.append(task[0].execute())
 

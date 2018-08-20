@@ -37,9 +37,6 @@ if __name__ == '__main__':
     logger = logging.getLogger(__name__)
 
     try:
-
-
-
         file = args.file
         if not os.path.exists(file):
             raise ValueError('{} does not exists!'.format(file))

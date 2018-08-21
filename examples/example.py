@@ -114,3 +114,20 @@ lsttask = TaskDefinition(
         'touch {MATCH}'
     ]
 )
+
+##############################################################
+
+DEP_VAR1='non_imported_var1'
+load('examples/importable.py', locals())
+DEP_VAR2='non_imported_var2'
+
+deptask1 = TaskDefinition(
+    name='DEPTASK1',
+    outputs=['runalways'],
+    dependencies=['IMPTASK1'],
+    actions=[
+        '@ echo {}'.format(DEP_VAR1),
+        '@ echo {}'.format(DEP_VAR2),
+        '@ echo {}'.format(DEP_VAR3),
+    ]
+)

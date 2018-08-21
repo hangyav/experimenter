@@ -227,16 +227,20 @@ class TaskPool:
 
     @staticmethod
     def init_from_py(file):
-        import sys
-        if sys.version_info[0] == 2:
-            importer = execFile
-        else:
-            importer = exec
+
+        def load(file, vars):
+            import sys
+            if sys.version_info[0] == 2:
+                importer = execFile
+            else:
+                importer = exec
+
+            with open(file, 'r') as fin:
+                importer(fin.read(), vars)
 
         vars = dict()
-        with open(file, 'r') as fin:
-            importer(fin.read(), vars)
-
+        vars['load'] = load
+        load(file, vars)
         tasks = [var for name, var in vars.items() if isinstance(var, TaskDefinition)]
         main_task = None
         if 'main' in vars:

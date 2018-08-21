@@ -16,7 +16,7 @@ cmd_lst = ['echo {}'.format(c) for c in echo_lst]
 imptask1 = TaskDefinition(
     name='IMPTASK1',
     outputs=['runalways'],
-    actions=['echo IMPTASK1'] + cmd_lst,
+    actions=['echo IMPTASK1', 'echo {}'.format(DEP_VAR1)] + cmd_lst,
 )
 
 ################################################################################

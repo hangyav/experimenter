@@ -233,13 +233,14 @@ class TaskPool:
         else:
             importer = exec
 
+        vars = dict()
         with open(file, 'r') as fin:
-            importer(fin.read())
+            importer(fin.read(), vars)
 
-        tasks = [var for name, var in locals().items() if isinstance(var, TaskDefinition)]
+        tasks = [var for name, var in vars.items() if isinstance(var, TaskDefinition)]
         main_task = None
-        if 'main' in locals():
-            main_task = locals()['main']
+        if 'main' in vars:
+            main_task = vars['main']
         return TaskPool(tasks, main=main_task)
 
     def lookup_task_by_pattern(self, name):

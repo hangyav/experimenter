@@ -51,7 +51,7 @@ ftask1 = TaskDefinition(
 )
 
 ftask2 = TaskDefinition(
-    patterns=['tmp/(?P<file>[^ ]+).txt'],
+    patterns=['tmp/(?P<file>[^ ]+)[.]txt'],
     actions=['touch tmp/{file}.txt', 'echo "asdqwe" > tmp/{file}.txt'],
     dependencies=['tmp/'],
     outputs=['tmp/{file}.txt']
@@ -94,5 +94,23 @@ errortask1 = TaskDefinition(
         'sleep 1m',
         'exit 1',
         'touch tmp/error2.txt',
+    ]
+)
+##############################################################
+
+lst0 = ['11', '22', '33']
+lst = ['tmp/lst{}-{}-{}-{}.lst'.format(i, j, k, l)
+       for i in range(2)
+       for j in range(10,15)
+       for k in ['asd', 'qwe']
+       for l in lst0
+       ]
+lsttask = TaskDefinition(
+    name='LSTTASK',
+    patterns = lst,
+    dependencies = ['tmp/'],
+    outputs=['{MATCH}'],
+    actions=[
+        'touch {MATCH}'
     ]
 )

@@ -2,7 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from experimenter.task import TaskDefinition
+from experimenter.task import TaskDefinition, load, var # import is optional
 
 main = 'FTask1'
 
@@ -117,9 +117,9 @@ lsttask = TaskDefinition(
 
 ##############################################################
 
-DEP_VAR1='non_imported_var1'
+DEP_VAR1=var('DEP_VAR1', 'non_imported_var1', locals())
 load('examples/importable.py', locals())
-DEP_VAR2='non_imported_var2'
+DEP_VAR2=var('DEP_VAR2', 'non_imported_var2', locals())
 
 deptask1 = TaskDefinition(
     name='DEPTASK1',

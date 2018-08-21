@@ -226,20 +226,19 @@ class TaskPool:
                 self._patterns.append((re.compile('^{}$'.format(dep)), task))
 
     @staticmethod
-    def init_from_py(file):
-
-        def load(file, vars):
-            import sys
-            if sys.version_info[0] == 2:
-                importer = execFile
-            else:
-                importer = exec
-
-            with open(file, 'r') as fin:
-                importer(fin.read(), vars)
-
+    def init_from_py(file, variables=None):
         vars = dict()
         vars['load'] = load
+        vars['var'] = var
+        vars['TaskDefinition'] = TaskDefinition
+
+        if variables is not None:
+            for cmdvar in variables:
+                cv = cmdvar.split('=')
+                if len(cv) != 2:
+                    raise ValueError('Invalid command line variable: {}'.format(cmdvar))
+                vars[cv[0]] = cv[1]
+
         load(file, vars)
         tasks = [var for name, var in vars.items() if isinstance(var, TaskDefinition)]
         main_task = None
@@ -303,3 +302,20 @@ class TaskPool:
     def handle_error(self):
         for task in self.active_tasks:
             task.recover()
+
+
+# FIXME the useage of these methods is not at all elegant
+def load(file, vars):
+    import sys
+    if sys.version_info[0] == 2:
+        importer = execFile
+    else:
+        importer = exec
+
+    with open(file, 'r') as fin:
+        importer(fin.read(), vars)
+
+def var(name, value, vars):
+    if name in vars:
+        return vars[name]
+    return value

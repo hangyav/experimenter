@@ -37,9 +37,10 @@ class TaskDefinition:
         return '{}: {}'.format(self.name, self.params)
 
     def create_instance(self, pool, pattern=None):
-        params = self.params
-        if params is None:
+        if self.params is None:
             params = dict()
+        else:
+            params = self.params.copy()
 
         if pattern is not None and pattern[1] is not None:
             match = re.search(pattern[1], pattern[0])
@@ -150,9 +151,13 @@ class TaskDefinition:
     @staticmethod
     def _get_param(x, params):
         if type(x) == tuple:
-            return x[0](*[v.format(**params) for v in x[1:]])
-
-        return x.format(**params)
+            return TaskDefinition._get_param(x[0](*[TaskDefinition._get_param(v, params) for v in x[1:]]), params)
+        elif type(x) == list:
+            return [TaskDefinition._get_param(v, params) for v in x]
+        elif type(x) == str:
+            return x.format(**params)
+        else:
+            raise ValueError('Type {} not a supported parameter!'.format(type(x)))
 
     @staticmethod
     def _earliest_output_modification_time(outputs):

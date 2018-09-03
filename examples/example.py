@@ -46,29 +46,29 @@ ftask1 = TaskDefinition(
     params={
             'out': 'FTask1.txt2',
         },
-    actions=['cat tmp/{out}'],
+    actions=['cat {DEP0}'],
     dependencies=['tmp/{out}']
 )
 
 ftask2 = TaskDefinition(
     patterns=['tmp/(?P<file>[^ ]+)[.]txt'],
-    actions=['touch tmp/{file}.txt', 'echo "asdqwe" > tmp/{file}.txt'],
+    actions=['touch {MATCH}', 'echo "asdqwe" > {OUT0}'],
     dependencies=['tmp/'],
-    outputs=['tmp/{file}.txt']
+    outputs=['{MATCH}']
 )
 
 
 ftask3 = TaskDefinition(
     patterns=['(?P<dir>[a-zA-Z/]+)/'],
-    actions=['mkdir -p {dir}'],
-    outputs=['{dir}/']
+    actions=['mkdir -p {MATCH}'],
+    outputs=['{MATCH}']
 )
 
 ftask4 = TaskDefinition(
     patterns=['tmp/(?P<file>[^ ]+).txt2'],
-    actions=['cat tmp/{file}.txt > tmp/{file}.txt2', 'cat tmp/{file}.txt >> tmp/{file}.txt2'],
+    actions=['cat {DEP0} > {MATCH}', 'cat {DEP0} >> {OUT0}'],
     dependencies=['tmp/{file}.txt'],
-    outputs=['tmp/{file}.txt2']
+    outputs=['{MATCH}']
 )
 
 ##############################################################
@@ -90,10 +90,10 @@ errortask1 = TaskDefinition(
     outputs=['tmp/error1.txt', 'tmp/error2.txt'],
     actions=[
         'mkdir -p tmp',
-        'touch tmp/error1.txt',
+        'touch {OUT0}',
         'sleep 1m',
         'exit 1',
-        'touch tmp/error2.txt',
+        'touch {OUT1}',
     ]
 )
 ##############################################################

@@ -51,8 +51,14 @@ class TaskDefinition:
         dependencies = list()
         latest_parent_modification = -1.0
         if self.dependencies is not None:
-            for dep in self.dependencies:
+            for dep_idx, dep in enumerate(self.dependencies):
                 dep = TaskDefinition._get_param(dep, params)
+
+                key = 'DEP{}'.format(dep_idx)
+                if key in params:
+                    raise ValueError('Invalid parameter name: {}'.format(key))
+                params[key] = dep
+
                 dep_task = None
                 pattern = None
                 tmp = pool.lookup_task_by_pattern(dep)
@@ -75,34 +81,27 @@ class TaskDefinition:
                     latest_parent_modification = max(latest_parent_modification, dep_instance[1])
 
         ##########################################################
+
+        outputs = list()
+        if self.outputs is not None:
+            outputs = [TaskDefinition._get_param(o, params) for o in self.outputs]
+            for oidx, o in enumerate(outputs):
+                key = 'OUT{}'.format(oidx)
+                if key in params:
+                    raise ValueError('Invalid parameter name: {}'.format(key))
+                params[key] = o
+
+        #########################################################
+
         tasks = None
         if self.actions is not None:
             tasks = self.executor([TaskDefinition._get_param(task, params) for task in self.actions])
 
         ##########################################################
 
-        outputs = list()
-        if self.outputs is not None:
-            outputs = [TaskDefinition._get_param(o, params) for o in self.outputs]
-
-        #########################################################
-
         earliest_modification = self._earliest_output_modification_time(outputs)
         if earliest_modification is None:
             earliest_modification = -1.0
-        # if len(dependencies) > 0:
-        #     pass
-        # elif self.dependencies is not None and len(self.dependencies) > 0 and len(dependencies) == 0 \
-        #         and len(outputs) > 0 and self._is_output_exists(outputs) and latest_parent_modification > -1.0 and latest_parent_modification <= earliest_modification:
-        #     logger.info('All dependencies are satisfied. Ignoring task.')
-        #     return (None, self._latest_output_modification_time(outputs))
-        # elif self.dependencies is not None and len(self.dependencies) > 0 and len(dependencies) == 0 \
-        #         and len(outputs) == 0:
-        #     logger.info('All dependencies are satisfied. Ignoring task.')
-        #     return (None, self._latest_output_modification_time(outputs))
-        # elif self.dependencies is None and len(outputs) > 0 and self._is_output_exists(outputs):
-        #     logger.info('All outputs are satisfied. Ignoring task.')
-        #     return (None, self._latest_output_modification_time(outputs))
 
         if len(outputs) > 0 and not self._is_output_exists(outputs):
             pass

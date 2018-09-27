@@ -46,7 +46,8 @@ class TaskDefinition:
             match = re.search(pattern[1], pattern[0])
             params['MATCH'] = pattern[0]
             for name, value in match.groupdict().items():
-                params[name] = value
+                if value is not None:
+                    params[name] = value
 
         ##########################################################
         dependencies = list()
@@ -282,7 +283,7 @@ class TaskPool:
 
         return res
 
-    def execute(self, task=None):
+    def execute(self, task=None, dry_run=False):
         if task is None:
             task = self.main
 
@@ -297,7 +298,8 @@ class TaskPool:
         try:
             print('\033[1m\033[91mNumber of tasks to run: {}\033[0m'.format(len(self.task_instances)))
             self.active_tasks = set()
-            dask.compute(*delays, num_workers=self.num_workers)
+            if not dry_run:
+                dask.compute(*delays, num_workers=self.num_workers)
         except BaseException as e:
             self.handle_error()
             self.active_tasks = None

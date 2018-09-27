@@ -19,6 +19,7 @@ def getArguments():
   parser.add_argument('--debug', type=int, default=0, help='Debug mode.')
   parser.add_argument('--log-level', type=str, default='WARNING', help='{NOTSET|DEBUNG|INFO|WARNING|ERROR|CRITICAL}')
   parser.add_argument('-v', '--variables', type=str, default=None, nargs='*', help='Tasks to execute.')
+  parser.add_argument('-d', '--dry_run', type=int, default=0, help='Do not run any task if non-zero.')
 
   return parser.parse_args()
 
@@ -58,7 +59,7 @@ if __name__ == '__main__':
         if main is not None:
             task_pool.main = main
 
-        task_pool.execute()
+        task_pool.execute(dry_run=args.dry_run)
 
     except BaseException as e:
         if debug > 0:

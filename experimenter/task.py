@@ -213,11 +213,12 @@ class TaskInstance:
 
 class TaskPool:
 
-    def __init__(self, tasks, main=None, num_workers=1):
+    def __init__(self, tasks, main=None, num_workers=1, client=None):
         self.tasks = tasks
         self.named_tasks = {task.name: task for task in tasks if task.name is not None}
         self.main = main
         self.num_workers = num_workers
+        self.client = client
         self.task_instances = dict()
 
         self.active_tasks = None
@@ -299,7 +300,14 @@ class TaskPool:
             print('\033[1m\033[91mNumber of tasks to run: {}\033[0m'.format(len(self.task_instances)))
             self.active_tasks = set()
             if not dry_run:
-                dask.compute(*delays, num_workers=self.num_workers)
+                if self.client is not None:
+                    #  self.client.compute(*delays, resources={y: {'GPU': i} for i, (t,y) in enumerate(self.task_instances.items())})
+                    #  self.client.compute(*delays)
+                    #  dask.compute(*delays, resources={y: {'GPU': i} for i, (t,y) in enumerate(self.task_instances.items())})
+                    dask.compute(*delays, num_workers=self.num_workers)
+                else:
+                    #  dask.compute(*delays, num_workers=self.num_workers)
+                    dask.compute(*delays, resources={y: {'GPU': i} for i, (t,y) in enumerate(self.task_instances.items())})
         except BaseException as e:
             self.handle_error()
             self.active_tasks = None

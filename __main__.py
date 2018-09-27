@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 import signal
+from dask.distributed import Client
 
 from experimenter.task import TaskPool
 
@@ -20,6 +21,7 @@ def getArguments():
   parser.add_argument('--log-level', type=str, default='WARNING', help='{NOTSET|DEBUNG|INFO|WARNING|ERROR|CRITICAL}')
   parser.add_argument('-v', '--variables', type=str, default=None, nargs='*', help='Tasks to execute.')
   parser.add_argument('-d', '--dry_run', type=int, default=0, help='Do not run any task if non-zero.')
+  parser.add_argument('-c', '--cluster', type=str, default=None, help='Use cluster')
 
   return parser.parse_args()
 
@@ -58,6 +60,11 @@ if __name__ == '__main__':
         main = args.main
         if main is not None:
             task_pool.main = main
+
+        client = None
+        if args.cluster is not None:
+            client = Client(args.cluster)
+        #  task_pool.client = client
 
         task_pool.execute(dry_run=args.dry_run)
 

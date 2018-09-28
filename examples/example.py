@@ -56,7 +56,7 @@ ftask2 = TaskDefinition(
     actions=['touch {MATCH}', 'echo "asdqwe" > {OUT0}'],
     dependencies=['tmp/'],
     outputs=['{MATCH}'],
-    resources={'CPU':1, 'MEMORY':200, 'GPU':1}
+    resources={'CPU':1, 'MEMORY':200}
 )
 
 
@@ -133,4 +133,33 @@ deptask1 = TaskDefinition(
         '@ echo {}'.format(DEP_VAR2),
         '@ echo {}'.format(DEP_VAR3),
     ]
+)
+
+##############################################################
+
+gpu_task1 = TaskDefinition(
+    name='GPUTEST1',
+    outputs=['runalways'],
+    actions=[
+        '~/.anaconda/bin/python  -c \'import tensorflow as tf; print(1); tf.test.gpu_device_name()\''
+    ],
+    resources={'GPU':1}
+)
+
+gpu_task2 = TaskDefinition(
+    name='GPUTEST2',
+    outputs=['runalways'],
+    actions=[
+        '~/.anaconda/bin/python  -c \'import tensorflow as tf; print(2); tf.test.gpu_device_name()\''
+    ],
+    resources={'GPU':1}
+)
+
+gpu_task3 = TaskDefinition(
+    name='GPUTEST3',
+    outputs=['runalways'],
+    actions=[
+        '~/.anaconda/bin/python  -c \'import tensorflow as tf; print(3); tf.test.gpu_device_name()\''
+    ],
+    resources={'GPU':1}
 )

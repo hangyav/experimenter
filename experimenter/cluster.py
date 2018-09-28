@@ -15,6 +15,7 @@ import os
 import sys
 from threading import Thread
 import time
+import yaml
 
 try:
     from queue import Queue
@@ -39,11 +40,11 @@ class ResourceAwareAdaptive(Adaptive):
         self.default_gpu = default_gpu
 
         if CPU not in self.max_resources:
-            self.max_resources[CPU] = self.default_cpu
+            self.max_resources[CPU] = -1
         if GPU not in self.max_resources:
-            self.max_resources[GPU] = self.default_gpu
+            self.max_resources[GPU] = -1
         if MEMORY not in self.max_resources:
-            self.max_resources[MEMORY] = self.default_memory
+            self.max_resources[MEMORY] = -1
 
     def get_used_resources(self):
         resources = {CPU:0, GPU:0, MEMORY:0}
@@ -67,7 +68,8 @@ class ResourceAwareAdaptive(Adaptive):
         memory = self.max_resources[MEMORY] - used_resources[MEMORY]
 
         for rest in restrictions:
-            if rest[GPU] <= gpu and rest[CPU] <= cpu and rest[MEMORY] <= memory:
+            if (gpu < 0 or rest[GPU] <= gpu) and (cpu < 0 or rest[CPU] <= cpu) \
+                    and (memory < 0 or rest[MEMORY] <= memory):
                 res.append(rest)
                 gpu -= rest[GPU]
                 cpu -= rest[CPU]
@@ -179,23 +181,81 @@ class ResourceAwareAdaptive(Adaptive):
 
 class SSHCluster(object):
 
-    def __init__(self, scheduler):
+    def __init__(self, scheduler, cluster_config):
         self.scheduler = scheduler
         self.staring = set()
         self.processes = dict()
+        self.cluster_config = SSHCluster.load_config(cluster_config)
 
         self.monitor_thread = Thread(target=self.monitor)
         self.monitor_thread.daemon = True
         self.monitor_thread.start()
 
+    @staticmethod
+    def load_config(file):
+        with open(file, 'r') as fin:
+            res = yaml.load(fin)
+        res = sorted(res.items(), key=lambda x:x[1]['priority'])
+        return res
+
+    @staticmethod
+    def is_fit(resources, requirements, used_resources=None):
+        if used_resources is None:
+            used_resources = dict()
+        for res, val in requirements.items():
+            if (res not in resources and val > 0) or resources.get(res, 0)-used_resources.get(res, 0) < val:
+                return False
+        return True
+
+    def get_used_resources(self, node): # TODO live monitor
+        result = dict()
+
+        for h, process in self.processes.items():
+            if process['address'] == node:
+                if process['gpu_indices'] is not None:
+                    if 'gpu_indices' in result:
+                        result['gpu_indices'] = result['gpu_indices'].union(set(process['gpu_indices']))
+                    else:
+                        result['gpu_indices'] = set(process['gpu_indices'])
+                for res, val in process['resources'].items():
+                    result[res] = result.get(res, 0) + val
+
+        return result
+
+    def get_config_for_request(self, requirements):
+        for node, config in self.cluster_config:
+            used_resources = self.get_used_resources(node)
+            if SSHCluster.is_fit(config['resources'], requirements, used_resources):
+                result = config.copy()
+                result['resources'] = requirements
+                result['worker_address'] = node
+
+                if GPU in result['resources'] and result['resources'][GPU] > 0:
+                    result['gpu_indices'] = list(
+                        set(result['gpu_indices']) - set(used_resources.get('gpu_indices', set()))
+                    )[:result['resources'][GPU]]
+
+                    if result['resources'][GPU] > len(result['gpu_indices']):
+                        result['resources'][GPU] = len(result['gpu_indices'])
+                    result['resources']['GPU_{}'.format(result['resources'][GPU])] = 1 # do not waste GPUs
+
+                return result
+
+        return None
 
     def scale_up(self, params):
-        for p in params[:1]:
+        for p in params:
+            p = {k:v for k, v in p.items() if 'GPU_' not in k} # do not waste GPUs
             h = str(p)
             if h in self.staring:
                 continue
+            config = self.get_config_for_request(p)
+            if config is None:
+                logger.info('No available resources for: {}'.format(p))
+                continue
+
             self.staring.add(h)
-            self.processes[h] = self.start_worker('alpha', p, remote_python='/mounts/Users/student/hangyav/.anaconda/bin/python')
+            self.processes[h] = self.start_worker(**config)
 
     def scale_down(self, workers):
         pass
@@ -210,21 +270,21 @@ class SSHCluster(object):
                     print(line)
             time.sleep(0.1)
 
-    def start_worker(self, worker_addr, resources,
+    def start_worker(self, worker_address, resources,
                      logdir=None, nthreads=1, nprocs=1, ssh_username=None,
                      ssh_port=22, ssh_private_key=None, nohost=True,
                      memory_limit=None, worker_port=None, nanny_port=None,
-                     remote_python=None):
+                     remote_python=None, gpu_indices=None, **kwargs):
 
         scheduler_addr = self.scheduler.ip
         scheduler_port = self.scheduler.port
 
-        cmd = ('{python} -m distributed.cli.dask_worker '
+        cmd = ('{params} {python} -m distributed.cli.dask_worker '
                '{scheduler_addr}:{scheduler_port} '
                '--nthreads {nthreads} --nprocs {nprocs} --resources {resources}')
 
         if not nohost:
-            cmd += ' --host {worker_addr} '
+            cmd += ' --host {worker_address} '
 
         if memory_limit:
             cmd += '--memory-limit {memory_limit} '
@@ -239,22 +299,23 @@ class SSHCluster(object):
             python=remote_python or sys.executable,
             scheduler_addr=scheduler_addr,
             scheduler_port=scheduler_port,
-            worker_addr=worker_addr,
+            worker_address=worker_address,
             nthreads=nthreads,
             nprocs=nprocs,
             memory_limit=memory_limit,
             worker_port=worker_port,
             nanny_port=nanny_port,
             resources=','.join(['{}={}'.format(res, val) for res, val in resources.items()]),
-        )
+            params='CUDA_VISIBLE_DEVICES={}'.format(','.join([str(i) for i in gpu_indices])) if gpu_indices is not None else ''
+        ).strip()
 
         # Optionally redirect stdout and stderr to a logfile
         if logdir is not None:
             cmd = 'mkdir -p {logdir} && '.format(logdir=logdir) + cmd
             cmd += '&> {logdir}/dask_scheduler_{addr}.log'.format(
-                addr=worker_addr, logdir=logdir)
+                addr=worker_address, logdir=logdir)
 
-        label = '{} {}'.format(worker_addr, resources)
+        label = '{} {}'.format(worker_address, resources)
 
         if ssh_username is None:
             ssh_username = getpass.getuser()
@@ -265,7 +326,7 @@ class SSHCluster(object):
         # interact with this command.
         input_queue = Queue()
         output_queue = Queue()
-        cmd_dict = {'cmd': cmd, 'label': label, 'address': worker_addr,
+        cmd_dict = {'cmd': cmd, 'label': label, 'address': worker_address,
                     'input_queue': input_queue, 'output_queue': output_queue,
                     'ssh_username': ssh_username, 'ssh_port': ssh_port,
                     'ssh_private_key': ssh_private_key}
@@ -284,14 +345,14 @@ class SSHCluster(object):
         thread.daemon = True
         thread.start()
 
-        return toolz.merge(cmd_dict, {'thread': thread})
+        return toolz.merge(cmd_dict, {'thread': thread, 'resources': resources, 'gpu_indices': gpu_indices})
 
 
 
 if __name__ == '__main__':
     loop = IOLoop.current()
     scheduler = Scheduler(loop=loop)
-    cluster = SSHCluster(scheduler)
+    cluster = SSHCluster(scheduler, 'cluster.yml')
     adapative_cluster = ResourceAwareAdaptive(scheduler, cluster=cluster, max_resources={CPU:10, MEMORY:10000, GPU:8})
     scheduler.start()
     install_signal_handlers(loop)

@@ -7,6 +7,7 @@ import re
 import os
 import shutil
 import dask
+from . import cluster
 
 from experimenter import executor
 
@@ -34,6 +35,8 @@ class TaskDefinition:
         self.executor = executor
         self.outputs = outputs
         self.resources = resources if resources is not None else {}
+        if cluster.GPU in self.resources:
+            self.resources['GPU_{}'.format(self.resources[cluster.GPU])] = 1
 
     def __str__(self):
         return '{}: {} {}'.format(self.name, self.params, self.patterns)
@@ -308,7 +311,6 @@ class TaskPool:
             self.active_tasks = set()
             executor.DRY_RUN = dry_run
             #  if not dry_run:
-            #  dask.compute(*delays, num_workers=self.num_workers)
             dask.compute(*delays, num_workers=self.num_workers,
                          resources={y: t.definition.resources for e,(y, t) in self.task_instances.items()})
         except BaseException as e:

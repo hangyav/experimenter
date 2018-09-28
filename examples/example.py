@@ -47,14 +47,16 @@ ftask1 = TaskDefinition(
             'out': 'FTask1.txt2',
         },
     actions=['cat {DEP0}'],
-    dependencies=['tmp/{out}']
+    dependencies=['tmp/{out}'],
+    resources={'foo':10, 'bar':21}
 )
 
 ftask2 = TaskDefinition(
     patterns=['tmp/(?P<file>[^ ]+)[.]txt'],
     actions=['touch {MATCH}', 'echo "asdqwe" > {OUT0}'],
     dependencies=['tmp/'],
-    outputs=['{MATCH}']
+    outputs=['{MATCH}'],
+    resources={'CPU':1, 'MEMORY':200, 'GPU':1}
 )
 
 
@@ -75,6 +77,7 @@ ftask4 = TaskDefinition(
 
 ptask2 = TaskDefinition(
     patterns=['echo_(?P<text>[a-zA-Z0-9/]+)'],
+    outputs=['always'],
     actions=['echo {text}']
 )
 

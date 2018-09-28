@@ -8,6 +8,7 @@ from distributed import Scheduler
 from tornado.ioloop import IOLoop
 from distributed.cli.utils import install_signal_handlers
 from distributed.utils import log_errors
+import toolz
 
 
 logger = logging.getLogger(__name__)
@@ -33,13 +34,26 @@ class ResourceAwareAdaptive(Adaptive):
         if MEMORY not in self.max_resources:
             self.max_resources[MEMORY] = self.default_memory
 
+    def get_used_resources(self):
+        resources = {CPU:0, GPU:0, MEMORY:0}
+
+        for worker in self.scheduler.workers.values():
+            for res, val in worker.resources.items():
+                if res not in resources:
+                    resources[res] = val
+                else:
+                    resources[res] += val
+
+        return resources
+
     def get_scale_up_kwargs(self):
         restrictions = [self.get_restrictions(t[0]) for t in self.scheduler.tasks.items() if t[1].state == 'no-worker']
         restrictions = sorted(restrictions, key=lambda x: (x[GPU], x[CPU], x[MEMORY]), reverse=True)
         res = list()
-        gpu = self.max_resources[GPU]
-        cpu = self.max_resources[CPU]
-        memory = self.max_resources[MEMORY]
+        used_resources = self.get_used_resources()
+        gpu = self.max_resources[GPU] - used_resources[GPU]
+        cpu = self.max_resources[CPU] - used_resources[CPU]
+        memory = self.max_resources[MEMORY] - used_resources[MEMORY]
 
         for rest in restrictions:
             if rest[GPU] <= gpu and rest[CPU] <= cpu and rest[MEMORY] <= memory:
@@ -102,40 +116,74 @@ class ResourceAwareAdaptive(Adaptive):
 
     def workers_to_close(self, **kwargs):
         restrictions = [self.get_restrictions(t[0]) for t in self.scheduler.tasks.items() if t[1].state == 'no-worker']
+        restrictions = sorted(restrictions, key=lambda x: (x[GPU], x[CPU], x[MEMORY]), reverse=True)
         # get all workers, filter out those which are suitable for corrent tasks, return (close) the rest
+        workers = [w for w in self.scheduler.workers.values() if len(w.processing) == 0]
 
-        #  if len(self.scheduler.workers) <= self.minimum:
-        #      return []
-        #
-        #  kw = dict(self._workers_to_close_kwargs)
-        #  kw.update(kwargs)
-        #
-        #  if self.maximum is not None and len(self.scheduler.workers) > self.maximum:
-        #      kw['n'] = len(self.scheduler.workers) - self.maximum
-        #
-        #  L = self.scheduler.workers_to_close(**kw)
-        #  if len(self.scheduler.workers) - len(L) < self.minimum:
-        #      L = L[:len(self.scheduler.workers) - self.minimum]
-        #
-        #  return L
+        tmp_workers = workers.copy()
+        for rest in restrictions:
+            for w in tmp_workers:
+                for res, val in rest.items():
+                    if res not in w.resources or w.resources[res] < val:
+                        break
+                else:
+                    workers.remove(w)
 
-        return []
+        workers = [w.address for w in workers]
+
+        return workers
+
+    def recommendations(self, comm=None):
+        should_scale_up = self.should_scale_up()
+        workers = set(self.workers_to_close(key=self.worker_key,
+                                            minimum=self.minimum))
+
+        if should_scale_up:
+            self.close_counts.clear()
+            return toolz.merge({'status': 'up'}, self.get_scale_up_kwargs())
+        elif workers:
+            d = {}
+            to_close = []
+            for w, c in self.close_counts.items():
+                if w in workers:
+                    if c >= self.wait_count:
+                        to_close.append(w)
+                    else:
+                        d[w] = c
+
+            for w in workers:
+                d[w] = d.get(w, 0) + 1
+
+            self.close_counts = d
+
+            if to_close:
+                return {'status': 'down', 'workers': to_close}
+        elif should_scale_up:
+            self.close_counts.clear()
+            return toolz.merge({'status': 'up'}, self.get_scale_up_kwargs())
+        else:
+            self.close_counts.clear()
+            return None
 
 
 class SSHCluster(object):
+
+    def __init__(self):
+        pass
+
     def scale_up(self, params):
         print('ADD: ', params)
-        #  raise NotImplementedError()
 
     def scale_down(self, workers):
-        print('REMOVE: ', workers)
-        #  raise NotImplementedError()
+        pass
+
+
 
 if __name__ == '__main__':
     loop = IOLoop.current()
     scheduler = Scheduler(loop=loop)
     cluster = SSHCluster()
-    adapative_cluster = ResourceAwareAdaptive(scheduler, cluster=cluster, minimum=0, maximum=10)
+    adapative_cluster = ResourceAwareAdaptive(scheduler, cluster=cluster, max_resources={CPU:10, MEMORY:10000, GPU:8})
     scheduler.start()
     install_signal_handlers(loop)
 

@@ -3,12 +3,23 @@ from __future__ import division
 from __future__ import print_function
 
 import logging
-from distributed.deploy import Adaptive
 from distributed import Scheduler
+from distributed.deploy import Adaptive
+from distributed.deploy.ssh import async_ssh
 from tornado.ioloop import IOLoop
 from distributed.cli.utils import install_signal_handlers
 from distributed.utils import log_errors
 import toolz
+import getpass
+import os
+import sys
+from threading import Thread
+import time
+
+try:
+    from queue import Queue
+except ImportError:  # Python 2.7 fix
+    from Queue import Queue
 
 
 logger = logging.getLogger(__name__)
@@ -168,21 +179,119 @@ class ResourceAwareAdaptive(Adaptive):
 
 class SSHCluster(object):
 
-    def __init__(self):
-        pass
+    def __init__(self, scheduler):
+        self.scheduler = scheduler
+        self.staring = set()
+        self.processes = dict()
+
+        self.monitor_thread = Thread(target=self.monitor)
+        self.monitor_thread.daemon = True
+        self.monitor_thread.start()
+
 
     def scale_up(self, params):
-        print('ADD: ', params)
+        for p in params[:1]:
+            h = str(p)
+            if h in self.staring:
+                continue
+            self.staring.add(h)
+            self.processes[h] = self.start_worker('alpha', p, remote_python='/mounts/Users/student/hangyav/.anaconda/bin/python')
 
     def scale_down(self, workers):
         pass
+
+    def monitor(self):
+        while True:
+            for h, process in self.processes.items():
+                while not process['output_queue'].empty():
+                    line = process['output_queue'].get()
+                    if 'Starting established connection' in line:
+                        self.staring.remove(h)
+                    print(line)
+            time.sleep(0.1)
+
+    def start_worker(self, worker_addr, resources,
+                     logdir=None, nthreads=1, nprocs=1, ssh_username=None,
+                     ssh_port=22, ssh_private_key=None, nohost=True,
+                     memory_limit=None, worker_port=None, nanny_port=None,
+                     remote_python=None):
+
+        scheduler_addr = self.scheduler.ip
+        scheduler_port = self.scheduler.port
+
+        cmd = ('{python} -m distributed.cli.dask_worker '
+               '{scheduler_addr}:{scheduler_port} '
+               '--nthreads {nthreads} --nprocs {nprocs} --resources {resources}')
+
+        if not nohost:
+            cmd += ' --host {worker_addr} '
+
+        if memory_limit:
+            cmd += '--memory-limit {memory_limit} '
+
+        if worker_port:
+            cmd += '--worker-port {worker_port} '
+
+        if nanny_port:
+            cmd += '--nanny-port {nanny_port} '
+
+        cmd = cmd.format(
+            python=remote_python or sys.executable,
+            scheduler_addr=scheduler_addr,
+            scheduler_port=scheduler_port,
+            worker_addr=worker_addr,
+            nthreads=nthreads,
+            nprocs=nprocs,
+            memory_limit=memory_limit,
+            worker_port=worker_port,
+            nanny_port=nanny_port,
+            resources=','.join(['{}={}'.format(res, val) for res, val in resources.items()]),
+        )
+
+        # Optionally redirect stdout and stderr to a logfile
+        if logdir is not None:
+            cmd = 'mkdir -p {logdir} && '.format(logdir=logdir) + cmd
+            cmd += '&> {logdir}/dask_scheduler_{addr}.log'.format(
+                addr=worker_addr, logdir=logdir)
+
+        label = '{} {}'.format(worker_addr, resources)
+
+        if ssh_username is None:
+            ssh_username = getpass.getuser()
+        if ssh_private_key is None:
+            ssh_private_key = os.path.expanduser('~/.ssh/id_rsa.pub')
+
+        # Create a command dictionary, which contains everything we need to run and
+        # interact with this command.
+        input_queue = Queue()
+        output_queue = Queue()
+        cmd_dict = {'cmd': cmd, 'label': label, 'address': worker_addr,
+                    'input_queue': input_queue, 'output_queue': output_queue,
+                    'ssh_username': ssh_username, 'ssh_port': ssh_port,
+                    'ssh_private_key': ssh_private_key}
+
+        def thread_wrapper(h, label, cmd_dict):
+            try:
+                async_ssh(cmd_dict)
+            except OSError as e:
+                pass
+
+            print('[ {} ] : {}'.format(label, 'Closed!'))
+            del self.processes[h]
+
+        # Start the thread
+        thread = Thread(target=thread_wrapper, args=[str(resources), label, cmd_dict])
+        thread.daemon = True
+        thread.start()
+
+        return toolz.merge(cmd_dict, {'thread': thread})
 
 
 
 if __name__ == '__main__':
     loop = IOLoop.current()
     scheduler = Scheduler(loop=loop)
-    cluster = SSHCluster()
+    cluster = SSHCluster(scheduler)
     adapative_cluster = ResourceAwareAdaptive(scheduler, cluster=cluster, max_resources={CPU:10, MEMORY:10000, GPU:8})
     scheduler.start()
     install_signal_handlers(loop)

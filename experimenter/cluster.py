@@ -76,7 +76,7 @@ class ResourceAwareAdaptive(Adaptive):
         return {'params':res}
 
     def get_restrictions(self, id):
-        restriction = self.scheduler.resource_restrictions[id]
+        restriction = self.scheduler.resource_restrictions[id] if id in self.scheduler.resource_restrictions else {}
         if CPU not in restriction:
             restriction[CPU] = self.default_cpu
         if MEMORY not in restriction:

@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class TaskDefinition:
 
     def __init__(self, actions=None, name=None, params=None, patterns=None, dependencies=None, executor=CliExecutor,
-                 outputs=None):
+                 outputs=None, resources=None):
         if (actions is None or len(actions) == 0) and len(dependencies) == 0:
             raise ValueError('At least one action or one dependency has to be defined!')
 
@@ -32,6 +32,7 @@ class TaskDefinition:
         self.dependencies = dependencies
         self.executor = executor
         self.outputs = outputs
+        self.resources = resources if resources is not None else {}
 
     def __str__(self):
         return '{}: {}'.format(self.name, self.params)
@@ -187,9 +188,9 @@ class TaskInstance:
         if self.task is not None:
             d = dask.delayed(self.task.execute)(self, dependencies=dep_delays)
             if self.task in self.pool.task_instances:
-                d = self.pool.task_instances[self.task]
+                d, _ = self.pool.task_instances[self.task]
             else:
-                self.pool.task_instances[self.task] = d
+                self.pool.task_instances[self.task] = (d, self)
             return d
         else:
             return dask.delayed(DummyExecutor().execute)(dependencies=dep_delays)
@@ -213,12 +214,11 @@ class TaskInstance:
 
 class TaskPool:
 
-    def __init__(self, tasks, main=None, num_workers=1, client=None):
+    def __init__(self, tasks, main=None, num_workers=1):
         self.tasks = tasks
         self.named_tasks = {task.name: task for task in tasks if task.name is not None}
         self.main = main
         self.num_workers = num_workers
-        self.client = client
         self.task_instances = dict()
 
         self.active_tasks = None
@@ -300,14 +300,9 @@ class TaskPool:
             print('\033[1m\033[91mNumber of tasks to run: {}\033[0m'.format(len(self.task_instances)))
             self.active_tasks = set()
             if not dry_run:
-                if self.client is not None:
-                    #  self.client.compute(*delays, resources={y: {'GPU': i} for i, (t,y) in enumerate(self.task_instances.items())})
-                    #  self.client.compute(*delays)
-                    #  dask.compute(*delays, resources={y: {'GPU': i} for i, (t,y) in enumerate(self.task_instances.items())})
-                    dask.compute(*delays, num_workers=self.num_workers)
-                else:
-                    #  dask.compute(*delays, num_workers=self.num_workers)
-                    dask.compute(*delays, resources={y: {'GPU': i} for i, (t,y) in enumerate(self.task_instances.items())})
+                #  dask.compute(*delays, num_workers=self.num_workers)
+                dask.compute(*delays, num_workers=self.num_workers,
+                             resources={y: t.definition.resources for e,(y, t) in self.task_instances.items()})
         except BaseException as e:
             self.handle_error()
             self.active_tasks = None

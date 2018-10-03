@@ -152,7 +152,7 @@ gpu_task2 = TaskDefinition(
     actions=[
         '~/.anaconda/bin/python  -c \'import tensorflow as tf; print(2); tf.test.gpu_device_name()\''
     ],
-    resources={'GPU':1}
+    resources={'GPU':2}
 )
 
 gpu_task3 = TaskDefinition(
@@ -161,5 +161,5 @@ gpu_task3 = TaskDefinition(
     actions=[
         '~/.anaconda/bin/python  -c \'import tensorflow as tf; print(3); tf.test.gpu_device_name()\''
     ],
-    resources={'GPU':1}
+    resources={'GPU':3}
 )

@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 CPU = 'CPU'
 GPU = 'GPU'
 MEMORY = 'MEMORY'
+LOCAL_DATA = 'LOCAL_DATA'
 
 class ResourceAwareAdaptive(Adaptive):
 
@@ -75,6 +76,12 @@ class ResourceAwareAdaptive(Adaptive):
                 cpu -= rest[CPU]
                 memory -= rest[MEMORY]
 
+        for w in self.scheduler.workers.values():
+            if LOCAL_DATA in w.resources:
+                break;
+        else:
+            res.append({LOCAL_DATA: 1})
+
         return {'params':res}
 
     def get_restrictions(self, id):
@@ -105,6 +112,9 @@ class ResourceAwareAdaptive(Adaptive):
 
     def should_scale_up(self):
         with log_errors():
+            if len(self.scheduler.workers) == 0:
+                return True
+
             required_resources = self.get_required_resources()
 
             for res, val in required_resources.items():
@@ -131,7 +141,7 @@ class ResourceAwareAdaptive(Adaptive):
         restrictions = [self.get_restrictions(t[0]) for t in self.scheduler.tasks.items() if t[1].state == 'no-worker']
         restrictions = sorted(restrictions, key=lambda x: (x[GPU], x[CPU], x[MEMORY]), reverse=True)
         # get all workers, filter out those which are suitable for corrent tasks, return (close) the rest
-        workers = [w for w in self.scheduler.workers.values() if len(w.processing) == 0]
+        workers = [w for w in self.scheduler.workers.values() if len(w.processing) == 0 and LOCAL_DATA not in w.resources]
 
         tmp_workers = workers.copy()
         for rest in restrictions:
@@ -151,10 +161,7 @@ class ResourceAwareAdaptive(Adaptive):
         workers = set(self.workers_to_close(key=self.worker_key,
                                             minimum=self.minimum))
 
-        if should_scale_up:
-            self.close_counts.clear()
-            return toolz.merge({'status': 'up'}, self.get_scale_up_kwargs())
-        elif workers:
+        if workers:
             d = {}
             to_close = []
             for w, c in self.close_counts.items():
@@ -186,6 +193,7 @@ class SSHCluster(object):
         self.staring = set()
         self.processes = dict()
         self.cluster_config = SSHCluster.load_config(cluster_config)
+        self.process_idx = 0
 
         self.monitor_thread = Thread(target=self.monitor)
         self.monitor_thread.daemon = True
@@ -195,6 +203,10 @@ class SSHCluster(object):
     def load_config(file):
         with open(file, 'r') as fin:
             res = yaml.load(fin)
+
+        for worker in res.keys():
+            res[worker]['resources'][LOCAL_DATA] = 1
+
         res = sorted(res.items(), key=lambda x:x[1]['priority'])
         return res
 
@@ -210,7 +222,7 @@ class SSHCluster(object):
     def get_used_resources(self, node): # TODO live monitor
         result = dict()
 
-        for h, process in self.processes.items():
+        for process in self.processes.values():
             if process['address'] == node:
                 if process['gpu_indices'] is not None:
                     if 'gpu_indices' in result:
@@ -255,22 +267,22 @@ class SSHCluster(object):
                 continue
 
             self.staring.add(h)
-            self.processes[h] = self.start_worker(**config)
+            self.start_worker(hash_code=h, **config)
 
     def scale_down(self, workers):
         pass
 
     def monitor(self):
         while True:
-            for h, process in self.processes.items():
+            for process in self.processes.values():
                 while not process['output_queue'].empty():
                     line = process['output_queue'].get()
                     if 'Starting established connection' in line:
-                        self.staring.remove(h)
+                        self.staring.remove(process['hash'])
                     print(line)
             time.sleep(0.1)
 
-    def start_worker(self, worker_address, resources,
+    def start_worker(self, worker_address, resources, hash_code,
                      logdir=None, nthreads=1, nprocs=1, ssh_username=None,
                      ssh_port=22, ssh_private_key=None, nohost=True,
                      memory_limit=None, worker_port=None, nanny_port=None,
@@ -341,11 +353,15 @@ class SSHCluster(object):
             del self.processes[h]
 
         # Start the thread
-        thread = Thread(target=thread_wrapper, args=[str(resources), label, cmd_dict])
+        h = self.process_idx
+        thread = Thread(target=thread_wrapper, args=[h, label, cmd_dict])
         thread.daemon = True
         thread.start()
 
-        return toolz.merge(cmd_dict, {'thread': thread, 'resources': resources, 'gpu_indices': gpu_indices})
+        self.processes[h] = toolz.merge(cmd_dict, {'thread': thread, 'resources': resources,
+                                                   'gpu_indices': gpu_indices,
+                                                   'hash': hash_code})
+        self.process_idx += 1
 
 
 

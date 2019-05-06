@@ -34,7 +34,7 @@ class TaskDefinition:
         self.outputs = outputs
 
     def __str__(self):
-        return '{}: {}'.format(self.name, self.params)
+        return '{}: {} {}'.format(self.name, self.params, self.patterns)
 
     def create_instance(self, pool, pattern=None):
         if self.params is None:
@@ -143,9 +143,9 @@ class TaskDefinition:
         res = None
         if os.path.exists(o):
             res = TaskDefinition._getmtime(o)
-        for o in outputs[1:]:
-            if os.path.exists(o):
-                res = func(res, TaskDefinition._getmtime(o))
+            for o in outputs[1:]:
+                if os.path.exists(o):
+                    res = func(res, TaskDefinition._getmtime(o))
 
         return res
 

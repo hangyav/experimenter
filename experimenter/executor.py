@@ -9,6 +9,7 @@ import dask
 import logging
 logger = logging.getLogger(__name__)
 
+DRY_RUN = False
 
 class CliExecutor:
 
@@ -18,18 +19,24 @@ class CliExecutor:
     def execute(self, task_instance, dependencies=None):
         res = list()
 
-        print('\033[1m\033[91m====================================\033[0m')
+        print('\033[1m\033[91m{}================={}===================\033[0m'.format('# ' if DRY_RUN else '',
+                                        ' {} '.format(task_instance.definition.name) if task_instance.definition.name else ''))
         task_instance.started()
         for command in self.commands:
             command = command.strip()
+            print_cmd = True
             if command[0] == '@':
                 command = command[1:]
+                print_cmd = DRY_RUN
+            if print_cmd:
+                print('\033[1m\033[1;33m{}\033[0m\033[0;33m{}\033[0m'.format('' if DRY_RUN else 'Running command: ', command))
+            if not DRY_RUN:
+                p = subprocess.run(args=[command], shell=True, stdout=sys.stdout, stderr=sys.stderr)
+                if p.returncode != 0:
+                    raise RuntimeError('Failure in task: {} command: {}'.format(str(task_instance.definition), p))
+                res.append(p.returncode)
             else:
-                print('\033[1m\033[1;33mRunning command: \033[0m\033[0;33m{}\033[0m'.format(command))
-            p = subprocess.run(args=[command], shell=True, stdout=sys.stdout, stderr=sys.stderr)
-            if p.returncode != 0:
-                raise RuntimeError('Failure in task: {} command: {}'.format(str(task_instance.definition), p))
-            res.append(p.returncode)
+                res.append(0)
 
         task_instance.stoped()
         return res

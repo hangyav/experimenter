@@ -8,15 +8,15 @@ import os
 import shutil
 import dask
 
-from experimenter.executor import CliExecutor, DummyExecutor
+from experimenter import executor
 
 
 logger = logging.getLogger(__name__)
 
 class TaskDefinition:
 
-    def __init__(self, actions=None, name=None, params=None, patterns=None, dependencies=None, executor=CliExecutor,
-                 outputs=None):
+    def __init__(self, actions=None, name=None, params=None, patterns=None,
+                 dependencies=None, executor=executor.CliExecutor, outputs=None):
         if (actions is None or len(actions) == 0) and len(dependencies) == 0:
             raise ValueError('At least one action or one dependency has to be defined!')
 
@@ -192,7 +192,7 @@ class TaskInstance:
                 self.pool.task_instances[self.task] = d
             return d
         else:
-            return dask.delayed(DummyExecutor().execute)(dependencies=dep_delays)
+            return dask.delayed(executor.DummyExecutor().execute)(dependencies=dep_delays)
 
     def started(self):
         self.pool.active_tasks.add(self)
@@ -245,7 +245,13 @@ class TaskPool:
                 vars[cv[0]] = cv[1]
 
         load(file, vars)
-        tasks = [var for name, var in vars.items() if isinstance(var, TaskDefinition)]
+        tasks = list()
+        for name, inst in vars.items():
+            if isinstance(inst, TaskDefinition):
+                if inst.name is None:
+                    inst.name = name
+                tasks.append(inst)
+        #  tasks = [var for name, var in vars.items() if isinstance(var, TaskDefinition)]
         main_task = None
         if 'main' in vars:
             main_task = vars['main']
@@ -296,10 +302,11 @@ class TaskPool:
                 delays.append(task[0].execute())
 
         try:
-            print('\033[1m\033[91mNumber of tasks to run: {}\033[0m'.format(len(self.task_instances)))
+            print('\033[1m\033[91m{}Number of tasks to run: {}\033[0m'.format('# ' if dry_run else '', len(self.task_instances)))
             self.active_tasks = set()
-            if not dry_run:
-                dask.compute(*delays, num_workers=self.num_workers)
+            executor.DRY_RUN = dry_run
+            #  if not dry_run:
+            dask.compute(*delays, num_workers=self.num_workers)
         except BaseException as e:
             self.handle_error()
             self.active_tasks = None

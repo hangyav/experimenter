@@ -62,7 +62,7 @@ if __name__ == '__main__':
             task_pool.main = main
 
         client = None
-        if args.cluster is not None:
+        if args.cluster is not None and not args.dry_run:
             client = Client(args.cluster)
         #  task_pool.client = client
 

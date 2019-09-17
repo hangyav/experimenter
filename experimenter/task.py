@@ -56,10 +56,16 @@ class TaskDefinition:
             for dep_idx, dep in enumerate(self.dependencies):
                 dep = TaskDefinition._get_param(dep, params)
 
+                if dep is None:
+                    dep = 'None'
+
                 key = 'DEP{}'.format(dep_idx)
                 if key in params:
                     raise ValueError('Invalid parameter name: {}'.format(key))
                 params[key] = dep
+
+                if dep.lower() == 'none':
+                    continue
 
                 dep_task = None
                 pattern = None
@@ -72,7 +78,7 @@ class TaskDefinition:
 
                 if dep_task is None:
                     if not os.path.exists(dep):
-                        raise ValueError('File dependency does not exists: {}'.format(dep))
+                        raise ValueError('File dependency does not exists (Task: {}): {}'.format(self.name, dep))
                     continue
 
                 ##########################################################
@@ -153,7 +159,9 @@ class TaskDefinition:
 
     @staticmethod
     def _get_param(x, params):
-        if type(x) == tuple:
+        if x is None:
+            return None
+        elif type(x) == tuple:
             return TaskDefinition._get_param(x[0](*[TaskDefinition._get_param(v, params) for v in x[1:]]), params)
         elif type(x) == list:
             return [TaskDefinition._get_param(v, params) for v in x]

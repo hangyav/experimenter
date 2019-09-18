@@ -32,6 +32,13 @@ GPU = 'GPU'
 MEMORY = 'MEMORY'
 LOCAL_DATA = 'LOCAL_DATA'
 
+# TODO show process output on the client side
+# TODO hard restriction on resources with ulimit
+# TODO live monitor of CPU and MEMORY resources as well
+# TODO allow not exlusive GPU usage with GPU memory
+# TODO more universal resource handling (now GPU index is specific)
+
+
 class ResourceAwareAdaptive(Adaptive):
 
     def __init__(self, scheduler, max_resources=None, default_cpu=1,
@@ -190,11 +197,11 @@ class ResourceAwareAdaptive(Adaptive):
 
 class SSHCluster(object):
 
-    def __init__(self, scheduler, cluster_config):
+    def __init__(self, scheduler, cluster_config_file=None, cluster_custom_config=None):
         self.scheduler = scheduler
         self.staring = set()
         self.processes = dict()
-        self.cluster_config = SSHCluster.load_config(cluster_config)
+        self.cluster_config = SSHCluster.load_config(cluster_config_file, cluster_custom_config)
         self.process_idx = 0
 
         self.monitor_thread = Thread(target=self.monitor)
@@ -202,14 +209,35 @@ class SSHCluster(object):
         self.monitor_thread.start()
 
     @staticmethod
-    def load_config(file):
-        with open(file, 'r') as fin:
-            res = yaml.load(fin)
+    def load_config(file=None, custom=None):
+        """
+        param: custom is : separated items, e.g. localhost:gpu_indices:1,2,4
+        """
+
+        assert file is not None or custom is not None, 'Either cluster file or parameters must be given'
+
+        if file is not None:
+            with open(file, 'r') as fin:
+                res = yaml.load(fin)
+        else:
+            res = dict()
+
+        if custom is not None:
+            for item in custom:
+                items = item.split(':')
+                if ',' in items[-1]:
+                    items[-1] = items[-1].split(',')
+
+                curr_res = res
+                for i in items[:-2]:
+                    curr_res = curr_res.setdefault(i, dict())
+                curr_res[items[-2]] = items[-1]
+
 
         for worker in res.keys():
             res[worker]['resources'][LOCAL_DATA] = 1
 
-        res = sorted(res.items(), key=lambda x:x[1]['priority'])
+        res = sorted(res.items(), key=lambda x:x[1].setdefault('priority', 0))
         return res
 
     @staticmethod
@@ -371,6 +399,7 @@ def getArguments():
   parser = argparse.ArgumentParser()
 
   parser.add_argument('-c', '--cluster', type=str, default=None,  help='Cluster definition file')
+  parser.add_argument('-cp', '--cluster_params', type=str, default=None, nargs='*', help='Cluster parameters separated by semicolon.')
 
   return parser.parse_args()
 
@@ -379,7 +408,7 @@ if __name__ == '__main__':
     args = getArguments()
     loop = IOLoop.current()
     scheduler = Scheduler(loop=loop)
-    cluster = SSHCluster(scheduler, args.cluster)
+    cluster = SSHCluster(scheduler, args.cluster, args.cluster_params)
     adapative_cluster = ResourceAwareAdaptive(scheduler, cluster=cluster, max_resources={CPU:10, MEMORY:10000, GPU:8})
     scheduler.start()
     install_signal_handlers(loop)

@@ -1,0 +1,18 @@
+localhost:
+    resources:
+        CPU: 20
+        GPU: 3
+        MEMORY: 100
+    gpu_indices: [4,5,6]
+    # logdir:
+    # nthreads:
+    # nprocs:
+    # ssh_username:
+    # ssh_port:
+    # ssh_private_key:
+    # nohost:
+    # memory_limit:
+    # worker_port:
+    # nanny_port:
+    remote_python: /mounts/Users/student/hangyav/.anaconda/bin/python
+    priority: 1

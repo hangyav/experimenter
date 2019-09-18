@@ -41,7 +41,7 @@ class TaskDefinition:
     def __str__(self):
         return '{}: {} {}'.format(self.name, self.params, self.patterns)
 
-    def create_instance(self, pool, pattern=None):
+    def create_instance(self, pool, force_run, pattern=None):
         if self.params is None:
             params = dict()
         else:
@@ -61,10 +61,16 @@ class TaskDefinition:
             for dep_idx, dep in enumerate(self.dependencies):
                 dep = TaskDefinition._get_param(dep, params)
 
+                if dep is None:
+                    dep = 'None'
+
                 key = 'DEP{}'.format(dep_idx)
                 if key in params:
                     raise ValueError('Invalid parameter name: {}'.format(key))
                 params[key] = dep
+
+                if dep.lower() == 'none':
+                    continue
 
                 dep_task = None
                 pattern = None
@@ -77,11 +83,11 @@ class TaskDefinition:
 
                 if dep_task is None:
                     if not os.path.exists(dep):
-                        raise ValueError('File dependency does not exists: {}'.format(dep))
+                        raise ValueError('File dependency does not exists (Task: {}): {}'.format(self.name, dep))
                     continue
 
                 ##########################################################
-                dep_instance = dep_task.create_instance(pool, pattern=(dep, pattern))
+                dep_instance = dep_task.create_instance(pool, force_run=force_run, pattern=(dep, pattern))
                 if dep_instance[0] is not None:
                     dependencies.append(dep_instance[0])
                 if dep_instance[1] is not None:
@@ -115,6 +121,8 @@ class TaskDefinition:
         elif len(dependencies) > 0:
             pass
         elif len(outputs) > 0 and latest_parent_modification > earliest_modification:
+            pass
+        elif force_run:
             pass
         else:
             logger.info('All dependencies and outputs are satisfied for task: {}'.format(self))
@@ -156,7 +164,9 @@ class TaskDefinition:
 
     @staticmethod
     def _get_param(x, params):
-        if type(x) == tuple:
+        if x is None:
+            return None
+        elif type(x) == tuple:
             return TaskDefinition._get_param(x[0](*[TaskDefinition._get_param(v, params) for v in x[1:]]), params)
         elif type(x) == list:
             return [TaskDefinition._get_param(v, params) for v in x]
@@ -272,7 +282,7 @@ class TaskPool:
             return None
         return found[0]
 
-    def _get_actual_tasks(self, tasks):
+    def _get_actual_tasks(self, tasks, force_run=False):
         res = list()
 
         if not isinstance(tasks, list):
@@ -280,21 +290,21 @@ class TaskPool:
 
         for item in tasks:
             if isinstance(item, TaskDefinition):
-                res.append(item.create_instance(self))
+                res.append(item.create_instance(self, force_run=force_run))
             elif isinstance(item, str):
                 if item in self.named_tasks:
-                    res.append(self.named_tasks[item].create_instance(self))
+                    res.append(self.named_tasks[item].create_instance(self, force_run=force_run))
                 else:
                     task = self.lookup_task_by_pattern(item)
                     if task is None:
                         raise ValueError('No such task: {}'.format(item))
-                    res.append(task[0].create_instance(self, pattern=(item, task[1])))
+                    res.append(task[0].create_instance(self, force_run=force_run, pattern=(item, task[1])))
             else:
                 raise ValueError('Invalid task: {}'.format(item))
 
         return res
 
-    def execute(self, task=None, dry_run=False):
+    def execute(self, task=None, dry_run=False, force_run=False):
         if task is None:
             task = self.main
 
@@ -302,7 +312,7 @@ class TaskPool:
                 raise ValueError('No main task is set!')
 
         delays = list()
-        for task in self._get_actual_tasks(task):
+        for task in self._get_actual_tasks(task, force_run=force_run):
             if task[0] is not None:
                 delays.append(task[0].execute())
 

@@ -3,6 +3,8 @@ from __future__ import division
 from __future__ import print_function
 
 import logging
+import argparse
+
 from distributed import Scheduler
 from distributed.deploy import Adaptive
 from distributed.deploy.ssh import async_ssh
@@ -365,10 +367,19 @@ class SSHCluster(object):
 
 
 
+def getArguments():
+  parser = argparse.ArgumentParser()
+
+  parser.add_argument('-c', '--cluster', type=str, default=None,  help='Cluster definition file')
+
+  return parser.parse_args()
+
+
 if __name__ == '__main__':
+    args = getArguments()
     loop = IOLoop.current()
     scheduler = Scheduler(loop=loop)
-    cluster = SSHCluster(scheduler, 'cluster.yml')
+    cluster = SSHCluster(scheduler, args.cluster)
     adapative_cluster = ResourceAwareAdaptive(scheduler, cluster=cluster, max_resources={CPU:10, MEMORY:10000, GPU:8})
     scheduler.start()
     install_signal_handlers(loop)

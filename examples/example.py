@@ -94,7 +94,7 @@ errortask1 = TaskDefinition(
     actions=[
         'mkdir -p tmp',
         'touch {OUT0}',
-        'sleep 1m',
+        'sleep 10s',
         'exit 1',
         'touch {OUT1}',
     ]
@@ -141,7 +141,10 @@ gpu_task1 = TaskDefinition(
     name='GPUTEST1',
     outputs=['runalways'],
     actions=[
-        '~/.anaconda/bin/python  -c \'import tensorflow as tf; print(1); tf.test.gpu_device_name()\''
+        #  '~/.anaconda/bin/python  -c \'import tensorflow as tf; print(1); tf.test.gpu_device_name()\'',
+        'echo 1',
+        'sleep 30s',
+        '/usr/local/cuda/extras/demo_suite/deviceQuery  | egrep "Bus ID|NumDevs"',
     ],
     resources={'GPU':1}
 )
@@ -150,7 +153,10 @@ gpu_task2 = TaskDefinition(
     name='GPUTEST2',
     outputs=['runalways'],
     actions=[
-        '~/.anaconda/bin/python  -c \'import tensorflow as tf; print(2); tf.test.gpu_device_name()\''
+        #  '~/.anaconda/bin/python  -c \'import tensorflow as tf; print(2); tf.test.gpu_device_name()\'',
+        'echo 2',
+        'sleep 30s',
+        '/usr/local/cuda/extras/demo_suite/deviceQuery  | egrep "Bus ID|NumDevs"',
     ],
     resources={'GPU':2}
 )
@@ -159,7 +165,10 @@ gpu_task3 = TaskDefinition(
     name='GPUTEST3',
     outputs=['runalways'],
     actions=[
-        '~/.anaconda/bin/python  -c \'import tensorflow as tf; print(3); tf.test.gpu_device_name()\''
+        #  '~/.anaconda/bin/python  -c \'import tensorflow as tf; print(3); tf.test.gpu_device_name()\'',
+        'echo 3',
+        'sleep 30s',
+        '/usr/local/cuda/extras/demo_suite/deviceQuery  | egrep "Bus ID|NumDevs"',
     ],
     resources={'GPU':3}
 )

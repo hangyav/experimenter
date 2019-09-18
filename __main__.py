@@ -21,11 +21,8 @@ def getArguments():
   parser.add_argument('--log_level', type=str, default='WARNING', help='{NOTSET|DEBUNG|INFO|WARNING|ERROR|CRITICAL}')
   parser.add_argument('-v', '--variables', type=str, default=None, nargs='*', help='Tasks to execute.')
   parser.add_argument('-d', '--dry_run', type=int, default=0, help='Do not run any task if non-zero.')
-<<<<<<< HEAD
-  parser.add_argument('-c', '--cluster', type=str, default=None, help='Use cluster')
-=======
   parser.add_argument('--force_run', type=int, default=0, help='Force running all tasks even if output exists (combine with dry_run to print commands for full experiment).')
->>>>>>> master
+  parser.add_argument('-c', '--cluster', type=str, default=None, help='Use cluster')
 
   return parser.parse_args()
 

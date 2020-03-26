@@ -20,9 +20,6 @@ class TaskDefinition:
         if (actions is None or len(actions) == 0) and len(dependencies) == 0:
             raise ValueError('At least one action or one dependency has to be defined!')
 
-        if patterns is None and name is None:
-            raise ValueError('Name or pattern has to be defined!')
-
         self.actions = actions
         self.name = name
         if params is None:
@@ -107,7 +104,7 @@ class TaskDefinition:
 
         ##########################################################
 
-        earliest_modification = self._earliest_output_modification_time(outputs)
+        earliest_modification = self._earliest_output_modification_time(outputs, follow_links=False)
         if earliest_modification is None:
             earliest_modification = -1.0
 
@@ -137,23 +134,25 @@ class TaskDefinition:
         return True
 
     @staticmethod
-    def _getmtime(x):
+    def _getmtime(x, follow_links=True):
         if os.path.isdir(x):
             return None
-        return os.path.getmtime(x)
+        if follow_links:
+            return os.path.getmtime(x)
+        return os.lstat(x).st_mtime
 
     @staticmethod
-    def _output_modification_time(outputs, func):
+    def _output_modification_time(outputs, func, follow_links=True):
         if outputs is None or len(outputs) == 0:
             return None
 
         o = outputs[0]
         res = None
         if os.path.exists(o):
-            res = TaskDefinition._getmtime(o)
+            res = TaskDefinition._getmtime(o, follow_links=follow_links)
             for o in outputs[1:]:
                 if os.path.exists(o):
-                    res = func(res, TaskDefinition._getmtime(o))
+                    res = func(res, TaskDefinition._getmtime(o, follow_links=follow_links))
 
         return res
 
@@ -171,12 +170,12 @@ class TaskDefinition:
             raise ValueError('Type {} not a supported parameter!'.format(type(x)))
 
     @staticmethod
-    def _earliest_output_modification_time(outputs):
-        return TaskDefinition._output_modification_time(outputs, min)
+    def _earliest_output_modification_time(outputs, follow_links=True):
+        return TaskDefinition._output_modification_time(outputs, min, follow_links=follow_links)
 
     @staticmethod
-    def _latest_output_modification_time(outputs):
-        return TaskDefinition._output_modification_time(outputs, max)
+    def _latest_output_modification_time(outputs, follow_links=True):
+        return TaskDefinition._output_modification_time(outputs, max, follow_links=follow_links)
 
 
 class TaskInstance:

@@ -25,8 +25,6 @@ def getArguments():
   return parser.parse_args()
 
 
-
-
 if __name__ == '__main__':
     args = getArguments()
     debug = args.debug

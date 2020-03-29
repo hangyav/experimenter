@@ -172,3 +172,14 @@ gpu_task3 = TaskDefinition(
     ],
     resources={'GPU':3}
 )
+
+gpu_task4 = TaskDefinition(
+    patterns = {'GPU_p-(?P<p>[0-9]+)'},
+    outputs=['runalways'],
+    actions=[
+        'echo {p}',
+        'sleep 10s',
+        '/usr/local/cuda/extras/demo_suite/deviceQuery  | egrep "Bus ID|NumDevs"',
+    ],
+    resources={'GPU':1}
+)

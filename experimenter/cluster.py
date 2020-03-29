@@ -4,13 +4,20 @@ from __future__ import print_function
 
 import logging
 import argparse
+from pprint import pprint
+from functools import partial
+import operator
 
 from distributed import Scheduler
+from distributed.scheduler import OrderedDict
 from distributed.deploy import Adaptive
 from distributed.deploy.ssh import async_ssh
 from tornado.ioloop import IOLoop
 from distributed.cli.utils import install_signal_handlers
 from distributed.utils import log_errors
+
+from tornado import gen
+
 import toolz
 import getpass
 import os
@@ -33,16 +40,50 @@ MEMORY = 'MEMORY'
 LOCAL_DATA = 'LOCAL_DATA'
 
 # TODO show process output on the client side
+# TODO delete partly done outputs on error
 # TODO hard restriction on resources with ulimit
 # TODO live monitor of CPU and MEMORY resources as well
 # TODO allow not exlusive GPU usage with GPU memory
 # TODO more universal resource handling (now GPU index is specific)
+# TODO make this less hacky
+# TODO close ssh connection after worker is closed
+
+
+class OnlyOneScheduler(Scheduler):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._transitions[('waiting', 'memory')] = lambda *args, **kwargs: OrderedDict()
+
+    def valid_workers(self, ts):
+        workers = super().valid_workers(ts)
+
+        if workers is True:
+            workers = self.workers.values()
+
+        workers = {w for w in workers if len(w.processing) == 0}
+        return workers
+
+    def decide_worker(self, ts):
+        """
+        Decide on a worker for task *ts*.  Return a WorkerState.
+        """
+        valid_workers = self.valid_workers(ts)
+        print('VALIDWORKERS: ', valid_workers)
+
+        if len(valid_workers) == 0:
+            self.unrunnable.add(ts)
+            ts.state = 'no-worker'
+            return None
+
+        # TODO pick smarter not to waste resources
+        return list(valid_workers)[0]
 
 
 class ResourceAwareAdaptive(Adaptive):
 
     def __init__(self, scheduler, max_resources=None, default_cpu=1,
-                 default_memory=1024, default_gpu=0, **kwargs):
+                 default_memory=1, default_gpu=0, **kwargs):
         super().__init__(scheduler, **kwargs)
         self.max_resources = max_resources if max_resources is not None else dict()
         self.default_cpu = default_cpu
@@ -121,6 +162,8 @@ class ResourceAwareAdaptive(Adaptive):
 
     def should_scale_up(self):
         with log_errors():
+            print('STATES: ',[t[1].state for t in self.scheduler.tasks.items()])
+            print('workers: ',self.scheduler.workers.values())
             if len(self.scheduler.workers) == 0:
                 return True
 
@@ -128,7 +171,7 @@ class ResourceAwareAdaptive(Adaptive):
 
             for res, val in required_resources.items():
                 if res in self.max_resources:
-                    required_resources[res] = min(val, self.max_resources[res])
+                    required_resources[res] = min(val, self.max_resources[res] if self.max_resources[res] >= 0 else val)
 
             used_resources = dict()
             for worker in self.scheduler.workers.values():
@@ -147,22 +190,24 @@ class ResourceAwareAdaptive(Adaptive):
             return False
 
     def workers_to_close(self, **kwargs):
-        restrictions = [self.get_restrictions(t[0]) for t in self.scheduler.tasks.items() if t[1].state == 'no-worker']
+        restrictions = [self.get_restrictions(t[0]) for t in self.scheduler.tasks.items() if t[1].state == 'no-worker' or t[1].state == 'processing' or t[1].state == 'waiting']
         restrictions = sorted(restrictions, key=lambda x: (x[GPU], x[CPU], x[MEMORY]), reverse=True)
-        # get all workers, filter out those which are suitable for corrent tasks, return (close) the rest
+        # get all workers, filter out those which are suitable for current tasks, return (close) the rest
         workers = [w for w in self.scheduler.workers.values() if len(w.processing) == 0 and LOCAL_DATA not in w.resources]
 
         tmp_workers = workers.copy()
-        for rest in restrictions:
-            for w in tmp_workers:
+        for w in tmp_workers:
+            for rest in restrictions:
                 for res, val in rest.items():
                     if res not in w.resources or w.resources[res] < val:
                         break
                 else:
                     workers.remove(w)
+                    restrictions.remove(rest)
+                    break
 
         workers = [w.address for w in workers]
-
+        print('CLOSE: ',workers)
         return workers
 
     def recommendations(self, comm=None):
@@ -223,10 +268,21 @@ class SSHCluster(object):
             res = dict()
 
         if custom is not None:
-            for item in custom:
-                items = item.split(':')
+            for items in custom:
+                items = items.split(':')
                 if ',' in items[-1]:
-                    items[-1] = items[-1].split(',')
+                    tmp = items[-1].split(',')
+                    for i in range(len(tmp)):
+                        try:
+                            tmp[i] = int(tmp[i])
+                        except:
+                            pass
+                    items[-1] = tmp
+                else:
+                    try:
+                        items[-1] = int(items[-1])
+                    except:
+                        pass
 
                 curr_res = res
                 for i in items[:-2]:
@@ -238,6 +294,11 @@ class SSHCluster(object):
             res[worker]['resources'][LOCAL_DATA] = 1
 
         res = sorted(res.items(), key=lambda x:x[1].setdefault('priority', 0))
+
+        print('============================================================')
+        pprint(res)
+        print('============================================================')
+
         return res
 
     @staticmethod
@@ -271,6 +332,9 @@ class SSHCluster(object):
                 result = config.copy()
                 result['resources'] = requirements
                 result['worker_address'] = node
+
+                if GPU not in requirements or requirements[GPU] == 0:
+                    del result['gpu_indices']
 
                 if GPU in result['resources'] and result['resources'][GPU] > 0:
                     result['gpu_indices'] = list(
@@ -348,7 +412,7 @@ class SSHCluster(object):
             worker_port=worker_port,
             nanny_port=nanny_port,
             resources=','.join(['{}={}'.format(res, val) for res, val in resources.items()]),
-            params='CUDA_VISIBLE_DEVICES={}'.format(','.join([str(i) for i in gpu_indices])) if gpu_indices is not None else ''
+            params='CUDA_VISIBLE_DEVICES={}'.format(','.join([str(i) for i in gpu_indices])) if gpu_indices is not None and len(gpu_indices) > 0 else ''
         ).strip()
 
         # Optionally redirect stdout and stderr to a logfile
@@ -357,7 +421,8 @@ class SSHCluster(object):
             cmd += '&> {logdir}/dask_scheduler_{addr}.log'.format(
                 addr=worker_address, logdir=logdir)
 
-        label = '{} {}'.format(worker_address, resources)
+        h = self.process_idx
+        label = 'PID: {}, {} {} GPU_IDs: {}'.format(h, worker_address, resources, gpu_indices)
 
         if ssh_username is None:
             ssh_username = getpass.getuser()
@@ -383,16 +448,15 @@ class SSHCluster(object):
             del self.processes[h]
 
         # Start the thread
-        h = self.process_idx
         thread = Thread(target=thread_wrapper, args=[h, label, cmd_dict])
         thread.daemon = True
         thread.start()
+
 
         self.processes[h] = toolz.merge(cmd_dict, {'thread': thread, 'resources': resources,
                                                    'gpu_indices': gpu_indices,
                                                    'hash': hash_code})
         self.process_idx += 1
-
 
 
 def getArguments():
@@ -407,9 +471,9 @@ def getArguments():
 if __name__ == '__main__':
     args = getArguments()
     loop = IOLoop.current()
-    scheduler = Scheduler(loop=loop)
+    scheduler = OnlyOneScheduler(loop=loop)
     cluster = SSHCluster(scheduler, args.cluster, args.cluster_params)
-    adapative_cluster = ResourceAwareAdaptive(scheduler, cluster=cluster, max_resources={CPU:10, MEMORY:10000, GPU:8})
+    adapative_cluster = ResourceAwareAdaptive(scheduler, cluster=cluster)
     scheduler.start()
     install_signal_handlers(loop)
 

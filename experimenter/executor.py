@@ -4,8 +4,6 @@ from __future__ import print_function
 
 import sys
 import subprocess
-import dask
-
 import logging
 logger = logging.getLogger(__name__)
 

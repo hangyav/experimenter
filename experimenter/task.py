@@ -6,10 +6,12 @@ import logging
 import re
 import os
 import shutil
-import dask
+from functools import partial
+
 from . import cluster
 
 from experimenter import executor
+from experimenter import scheduler
 
 
 logger = logging.getLogger(__name__)
@@ -113,7 +115,9 @@ class TaskDefinition:
         if earliest_modification is None:
             earliest_modification = -1.0
 
-        if len(outputs) > 0 and not self._is_output_exists(outputs):
+        if outputs is None or len(outputs) == 0:
+            pass
+        elif not self._is_output_exists(outputs):
             pass
         elif len(dependencies) > 0:
             pass
@@ -183,6 +187,14 @@ class TaskDefinition:
         return TaskDefinition._output_modification_time(outputs, max, follow_links=follow_links)
 
 
+class ExecNode():
+
+    def __init__(self, function, resources, dependencies=None):
+        self.function = function
+        self.resources = resources
+        self.dependencies = dependencies
+
+
 class TaskInstance:
 
     def __init__(self, task, dependencies, definition, pool, outputs):
@@ -196,23 +208,19 @@ class TaskInstance:
 
     def execute(self):
 
-        dep_delays = [dep.execute() for dep in self.dependecies]
+        dep_nodes = [dep.execute() for dep in self.dependecies]
 
         if self.task is not None:
-            d = dask.delayed(self.task.execute)(self, dependencies=dep_delays)
+            d = ExecNode(partial(self.task.execute, self), self.definition.resources,
+                         dep_nodes)
             if self.task in self.pool.task_instances:
                 d, _ = self.pool.task_instances[self.task]
             else:
                 self.pool.task_instances[self.task] = (d, self)
             return d
         else:
-            return dask.delayed(executor.DummyExecutor().execute)(dependencies=dep_delays)
-
-    def started(self):
-        self.pool.active_tasks.add(self)
-
-    def stoped(self):
-        self.pool.active_tasks.remove(self)
+            return ExecNode(partial(executor.DummyExecutor().execute), self.definition.resources,
+                            dep_nodes)
 
     def recover(self):
         if self.outputs is not None:
@@ -227,14 +235,12 @@ class TaskInstance:
 
 class TaskPool:
 
-    def __init__(self, tasks, main=None, num_workers=1):
+    def __init__(self, tasks, main=None):
         self.tasks = tasks
         self.named_tasks = {task.name: task for task in tasks if task.name is not None}
         self.main = main
-        self.num_workers = num_workers
         self.task_instances = dict()
-
-        self.active_tasks = None
+        self.scheduler = None
 
         self._patterns = list()
         for task in tasks:
@@ -303,33 +309,24 @@ class TaskPool:
 
         return res
 
-    def execute(self, task=None, dry_run=False, force_run=False):
+    def execute(self, task=None, dry_run=False, force_run=False, wait_for_unfinished=True,
+                num_workers=1):
         if task is None:
             task = self.main
 
             if task is None:
                 raise ValueError('No main task is set!')
 
-        delays = list()
+        exec_nodes = list()
         for task in self._get_actual_tasks(task, force_run=force_run):
             if task[0] is not None:
-                delays.append(task[0].execute())
+                exec_nodes.append(task[0].execute())
 
-        try:
-            print('\033[1m\033[91m{}Number of tasks to run: {}\033[0m'.format('# ' if dry_run else '', len(self.task_instances)))
-            self.active_tasks = set()
-            executor.DRY_RUN = dry_run
-            #  if not dry_run:
-            dask.compute(*delays, num_workers=self.num_workers,
-                         resources={y: t.definition.resources for e,(y, t) in self.task_instances.items()})
-        except BaseException as e:
-            self.handle_error()
-            self.active_tasks = None
-            raise e
-
-    def handle_error(self):
-        for task in self.active_tasks:
-            task.recover()
+        print('\033[1m\033[91m{}Number of tasks to run: {}\033[0m'.format('# ' if dry_run else '', len(self.task_instances)))
+        executor.DRY_RUN = dry_run
+        sched = scheduler.LocalScheduler(num_processes=num_workers,
+                                         wait_for_unfinished=wait_for_unfinished)
+        sched.execute(exec_nodes)
 
 
 # FIXME the useage of these methods is not at all elegant

@@ -22,6 +22,7 @@ def getArguments():
   parser.add_argument('-v', '--variables', type=str, default=None, nargs='*', help='Tasks to execute.')
   parser.add_argument('-d', '--dry_run', type=int, default=0, help='Do not run any task if non-zero.')
   parser.add_argument('--force_run', type=int, default=0, help='Force running all tasks even if output exists (combine with dry_run to print commands for full experiment).')
+  parser.add_argument('--wait_for_unfinished', type=int, default=1, help='Wait for unfunished tasks upon exception.')
   parser.add_argument('-c', '--cluster', type=str, default=None, help='Use cluster')
 
   return parser.parse_args()
@@ -46,12 +47,11 @@ if __name__ == '__main__':
         file = os.path.abspath(file)
 
         task_pool = TaskPool.init_from_py(file, args.variables)
-        task_pool.num_workers = args.threads
 
         def signal_handler(signal, frame):
-            logger.error('Signal handler called with signal: {}'.format(signal))
-            task_pool.handle_error()
-            sys.exit(1)
+            # TODO do not print exceptions in worker processes
+            logger.info('Signal handler called with signal: {}'.format(signal))
+            raise InterruptedError('Signal handler called with signal: {}'.format(signal))
 
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
@@ -65,7 +65,9 @@ if __name__ == '__main__':
             client = Client(args.cluster)
         #  task_pool.client = client
 
-        task_pool.execute(dry_run=args.dry_run, force_run=args.force_run)
+        task_pool.execute(dry_run=args.dry_run, force_run=args.force_run,
+                          num_workers=args.threads,
+                          wait_for_unfinished=args.wait_for_unfinished!=0)
 
     except BaseException as e:
         if debug > 0:

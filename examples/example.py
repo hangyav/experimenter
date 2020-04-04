@@ -16,7 +16,7 @@ task1 = TaskDefinition(
                   ]
 )
 
-task2 =  TaskDefinition(
+task2 = TaskDefinition(
     name='Task2',
     params={
         'param1': 12,
@@ -25,7 +25,7 @@ task2 =  TaskDefinition(
     actions=['echo TASK2 {param1}', 'echo {param2}']
 )
 
-task3 =  TaskDefinition(
+task3 = TaskDefinition(
     patterns=['task3_param2-(?P<param2>[0-9]+)_param3-(?P<param3>[a-z]+)_end'],
     params={
         'param1': 20,
@@ -77,13 +77,13 @@ ftask4 = TaskDefinition(
 
 ptask2 = TaskDefinition(
     patterns=['echo_(?P<text>[a-zA-Z0-9/]+)'],
-    outputs=['always'],
     actions=['echo {text}']
 )
 
 ptask1 = TaskDefinition(
     name='PTask1',
-    dependencies=['echo_{}'.format(i) for i in range(10)] + ['echo_{}'.format(i) for i in range(10)]
+    dependencies=['echo_{}'.format(i) for i in range(10)] + ['echo_{}'.format(i) for i in range(10)],
+    #  actions=['echo PTask1'],
 )
 
 ##############################################################
@@ -94,9 +94,35 @@ errortask1 = TaskDefinition(
     actions=[
         'mkdir -p tmp',
         'touch {OUT0}',
-        'sleep 10s',
-        'exit 1',
+        'sleep 5s',
+        'ls asd',
         'touch {OUT1}',
+    ]
+)
+
+errortask2 = TaskDefinition(
+    name='ERRORTASK2',
+    dependencies=[
+        'ERRORTASK1',
+        'wait_10',
+        'tmp/error_7.err',
+    ],
+)
+
+wait_Task = TaskDefinition(
+    patterns={'wait_(?P<t>[0-9]+)'},
+    actions=[
+        'sleep {t}s',
+    ]
+)
+
+errortaskn = TaskDefinition(
+    patterns=['tmp/error_(?P<t>[0-9]+).err'],
+    outputs=['{MATCH}', 'run_always'],
+    actions=[
+        'mkdir -p tmp',
+        'touch {MATCH}',
+        'sleep {t}s',
     ]
 )
 ##############################################################
@@ -110,14 +136,16 @@ lst = ['tmp/lst{}-{}-{}-{}.lst'.format(i, j, k, l)
        ]
 lsttask = TaskDefinition(
     name='LSTTASK',
-    patterns = lst,
-    dependencies = ['tmp/'],
+    dependencies=lst,
+)
+touch_lst_file = TaskDefinition(
+    patterns=['tmp/lst.+.lst'],
     outputs=['{MATCH}'],
+    dependencies=['tmp/'],
     actions=[
-        'touch {MATCH}'
+        'touch {MATCH}',
     ]
 )
-
 ##############################################################
 
 DEP_VAR1=var('DEP_VAR1', 'non_imported_var1', locals())

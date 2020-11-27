@@ -24,15 +24,6 @@ GPU = 'GPU'
 GPU_INDICES = 'gpu_indices'
 
 
-def task1():
-    import subprocess
-    p = subprocess.Popen(args=['python -c \'import torch; print(torch.cuda.device_count())\''], shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    #  p = subprocess.Popen(args=['nvidia-smi'], shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    output, err = p.communicate()
-    print(output)
-    return output
-
-
 def get_resources(gpu_exclude=None, gpu_max_load=0.05, gpu_max_memory=0.05, gpu_memory_free=0,
                   cpu_load_idx=1):
     import GPUtil
@@ -52,7 +43,6 @@ def get_resources(gpu_exclude=None, gpu_max_load=0.05, gpu_max_memory=0.05, gpu_
                                excludeID=gpu_exclude, memoryFree=gpu_memory_free,
                                limit=1000000)
     resources['GPU'] = gpus
-    print(resources)
     return resources
 
 
@@ -104,6 +94,7 @@ class RPyCCluster(_base.Executor):
         self.running_work_items = list()
         self.sentry_thread = None
         self.new_work_item_event = threading.Event()
+        self.shutdown_flag = 0
 
     @staticmethod
     def load_config(file=None, custom=None):
@@ -258,6 +249,9 @@ class RPyCCluster(_base.Executor):
         Returns:
             A Future representing the given call.
         """
+        if self.shutdown_flag > 0:
+            raise Exception('Shutdown aleady initiated')
+
         f = _base.Future()
         w = WorkItem(fn, resources, f)
         self.pending_work_items.append(w)
@@ -267,7 +261,7 @@ class RPyCCluster(_base.Executor):
 
         return f
 
-    def shutdown(self, wait=True):
+    def shutdown(self, wait=True, force=False):
         """Clean-up the resources associated with the Executor.
 
         It is safe to call this method several times. Otherwise, no other
@@ -278,8 +272,14 @@ class RPyCCluster(_base.Executor):
                 futures have finished executing and the resources used by the
                 executor have been reclaimed.
         """
-        # TODO
-        print('TODO SHUTDOWN!!!!')
+        self.shutdown_flag = 2 if force else 1
+        self.new_work_item_event.set()
+        if wait:
+            while True:
+                if len(self.running_work_items) + len(self.pending_work_items) == 0:
+                    return
+
+                self.new_work_item_event.wait()
 
 
     def start_sentry_thread(self):
@@ -306,6 +306,12 @@ class RPyCCluster(_base.Executor):
                     self.free_up_resources(item.connection.server_name, item.used_resources)
                     item.connection.server.close()
                     to_pop.append(i)
+                elif self.shutdown_flag > 1:
+                    # TODO connection is not interrupted
+                    item.future.set_exception(InterruptedError('Interrupted by user'))
+                    self.free_up_resources(item.connection.server_name, item.used_resources)
+                    item.connection.server.close()
+                    to_pop.append(i)
 
             for i in to_pop[::-1]:
                 self.running_work_items.pop(i)
@@ -313,6 +319,10 @@ class RPyCCluster(_base.Executor):
             # Start new tasks
             to_pop = list()
             for i, item in enumerate(self.pending_work_items):
+                if self.shutdown_flag > 1:
+                    to_pop.append(i)
+                    continue
+
                 conn_obj = self.get_connection_for_resource(item.resources)
 
                 if conn_obj is not None:
@@ -335,9 +345,13 @@ class RPyCCluster(_base.Executor):
             for i in to_pop[::-1]:
                 self.pending_work_items.pop(i)
 
+            if self.shutdown_flag > 0 and len(self.running_work_items) + len(self.pending_work_items) == 0:
+                break
 
             self.new_work_item_event.wait(1)
             self.new_work_item_event.clear()
+
+        self.new_work_item_event.set()
 
     @staticmethod
     def monitor_process(info, inp):
@@ -351,30 +365,19 @@ class RPyCCluster(_base.Executor):
             '{}-{}-{}'.format(connection.server_name, task_idx, 'OUT'),
             connection.server.proc.stdout,)
             )
-        thread.daemon = True
+        thread.daemon = False
         thread.start()
         # STDERR
         thread = threading.Thread(target=RPyCCluster.monitor_process, args=(
             '{}-{}-{}'.format(connection.server_name, task_idx, 'ERR'),
             connection.server.proc.stderr,)
             )
-        thread.daemon = True
+        thread.daemon = False
         thread.start()
 
 
 def getArguments():
   parser = argparse.ArgumentParser()
-
-  #  parser.add_argument('-s', '--server', type=str, help='Server to connect to.')
-  #  parser.add_argument('-f', '--file', type=str, default='experiment.py', help='File that contains tasks.')
-  #  parser.add_argument('-m', '--main', type=str, default=None, nargs='*', help='Tasks to execute.')
-  #  parser.add_argument('-t', '--threads', type=int, default=1, help='Number of threads to Use.')
-  #  parser.add_argument('--debug', type=int, default=0, help='Debug mode.')
-  #  parser.add_argument('--log_level', type=str, default='WARNING', help='{NOTSET|DEBUNG|INFO|WARNING|ERROR|CRITICAL}')
-  #  parser.add_argument('-v', '--variables', type=str, default=None, nargs='*', help='Tasks to execute.')
-  #  parser.add_argument('-d', '--dry_run', type=int, default=0, help='Do not run any task if non-zero.')
-  #  parser.add_argument('--force_run', type=int, default=0, help='Force running all tasks even if output exists (combine with dry_run to print commands for full experiment).')
-  #  parser.add_argument('--wait_for_unfinished', type=int, default=1, help='Wait for unfunished tasks upon exception.')
   parser.add_argument('-c', '--cluster', type=str, default=None,  help='Cluster definition file')
   parser.add_argument('-cp', '--cluster_params', type=str, default=None, nargs='*', help='Cluster parameters separated by semicolon.')
 
@@ -385,23 +388,11 @@ if __name__ == '__main__':
     args = getArguments()
     logging.basicConfig(level=logging.INFO)
 
-    #  from rpyc.utils.server import ThreadedServer
-    #  t = ThreadedServer(RPyCCluster(), port=18861)
-    #  t.start()
-
-    #  m = SshMachine('localhost')
-    #  m = SshMachine(args.server)
-    #  s = DeployedServer(m, python_executable='~/.anaconda/bin/python')
-    #  c = s.classic_connect()
 
     cluster = RPyCCluster(cluster_config_file=args.cluster, cluster_custom_config=args.cluster_params)
-    #
-    #  c = cluster.get_connection_for_resource({CPU: 1})
     c, _ = cluster.get_connection_for_resource({CPU: 1, GPU: 3})
     print(c.modules.sys.executable)
     print(c.modules.os.environ)
     res = c.teleport(get_resources)
-    t = c.teleport(task1)
 
     print('Resources: ', res())
-    print('Task1: ', t().decode('utf-8'))

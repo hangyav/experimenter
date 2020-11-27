@@ -158,7 +158,6 @@ class RPyCScheduler(LocalScheduler):
                     # all tasks are finished and running with multiple processes
                     # the above seems to work OK
                     #  futures = [item for item in futures if not item[0].done()]
-
             except Exception as e:
                 exception = True
                 raise e
@@ -167,7 +166,7 @@ class RPyCScheduler(LocalScheduler):
                     if self.wait_for_unfinished:
                         logger.warning('Waiting for running tasks to finish after exception...')
                     else:
-                        pool.shutdown()
+                        pool.shutdown(True, True)
                 while len([f for f in futures if not f[0].done()]) > 0:
                     event.wait(10)
                     event.clear()

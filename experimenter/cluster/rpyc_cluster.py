@@ -10,6 +10,7 @@ from concurrent.futures import _base
 from multiprocessing import Lock
 
 import rpyc
+import dill
 import yaml
 from plumbum import SshMachine
 from rpyc.utils.zerodeploy import DeployedServer
@@ -55,6 +56,12 @@ def get_resources(gpu_exclude=None, gpu_max_load=0.05, gpu_max_memory=0.05, gpu_
     return resources
 
 
+def run_dill_encoded(what):
+    import dill
+    fun, args = dill.loads(what)
+    return fun(*args)
+
+
 class WorkItem():
 
     def __init__(self, function, resources, future):
@@ -69,9 +76,10 @@ class WorkItem():
 
 class RPyCConnection():
 
-    def __init__(self, connection, server, ssh):
+    def __init__(self, connection, server, server_name, ssh):
         self.connection = connection
         self.server = server
+        self.server_name = server_name
         self.ssh = ssh
 
     def __del__(self):
@@ -208,10 +216,14 @@ class RPyCCluster(_base.Executor):
 
     def free_up_resources(self, server, resources):
         for resource, value in resources.items():
-            if resource == GPU_INDICES:
-                self.used_resources[server][resource] -= set(value)
-            else:
-                self.used_resources[server][resource] -= value
+            try:
+                if resource == GPU_INDICES:
+                    self.used_resources[server][resource] -= set(value)
+                else:
+                    self.used_resources[server][resource] -= value
+            except BaseException as e:
+                print(server, resource, value, self.used_resources)
+                raise e
 
     def get_connection(self, server, resources):
         logger.info('Initializing connection to {}...'.format(server))
@@ -232,9 +244,7 @@ class RPyCCluster(_base.Executor):
                            extra_setup=setup)
         c = s.classic_connect()
 
-        connection = RPyCConnection(c, s, m)
-        # TODO Is this super slow?
-        connection.modules.sys.stdout = sys.stdout
+        connection = RPyCConnection(c, s, server, m)
 
         return connection
 
@@ -279,17 +289,21 @@ class RPyCCluster(_base.Executor):
             self.sentry_thread.start()
 
     def sentry_fn(self):
+        task_idx = 0
         while True:
             # clean up finished items
             to_pop = list()
             for i, item in enumerate(self.running_work_items):
                 if item.async_result.ready:
                     if item.async_result.error:
-                        item.future.set_exception(item.async_result.value)
+                        try:
+                            item.async_result.value
+                        except BaseException as e:
+                            item.future.set_exception(e)
                     else:
                         item.future.set_result(item.async_result.value)
 
-                    self.free_up_resources(item.connection.server, item.used_resources)
+                    self.free_up_resources(item.connection.server_name, item.used_resources)
                     item.connection.server.close()
                     to_pop.append(i)
 
@@ -304,9 +318,11 @@ class RPyCCluster(_base.Executor):
                 if conn_obj is not None:
                     connection = conn_obj[0]
                     resources = conn_obj[1]
+                    self.start_process_monitor_thread(connection, task_idx)
+                    task_idx +=1
 
-                    fn = connection.teleport(item.function)
-                    res = rpyc.async_(fn)()
+                    fn = connection.teleport(run_dill_encoded)
+                    res = rpyc.async_(fn)(dill.dumps((item.function, [])))
 
                     item.connection = connection
                     item.used_resources = resources
@@ -315,12 +331,35 @@ class RPyCCluster(_base.Executor):
                     to_pop.append(i)
                     self.running_work_items.append(item)
 
+
             for i in to_pop[::-1]:
                 self.pending_work_items.pop(i)
 
 
-            self.new_work_item_event.wait(10)
+            self.new_work_item_event.wait(1)
             self.new_work_item_event.clear()
+
+    @staticmethod
+    def monitor_process(info, inp):
+        for line in inp:
+            print(f'{info}: '.format(), line.decode('utf-8').strip())
+
+    @staticmethod
+    def start_process_monitor_thread(connection, task_idx):
+        # STDOUT
+        thread = threading.Thread(target=RPyCCluster.monitor_process, args=(
+            '{}-{}-{}'.format(connection.server_name, task_idx, 'OUT'),
+            connection.server.proc.stdout,)
+            )
+        thread.daemon = True
+        thread.start()
+        # STDERR
+        thread = threading.Thread(target=RPyCCluster.monitor_process, args=(
+            '{}-{}-{}'.format(connection.server_name, task_idx, 'ERR'),
+            connection.server.proc.stderr,)
+            )
+        thread.daemon = True
+        thread.start()
 
 
 def getArguments():

@@ -33,8 +33,6 @@ class TaskDefinition:
         self.executor = executor
         self.outputs = outputs
         self.resources = resources if resources is not None else {}
-        if GPU in self.resources:
-            self.resources['GPU_{}'.format(self.resources[GPU])] = 1
 
     def __str__(self):
         return '{}: {} {}'.format(self.name, self.params, self.patterns)

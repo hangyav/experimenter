@@ -17,8 +17,12 @@ class CliExecutor:
     def execute(self, task_instance):
         res = list()
 
-        print('\033[1m\033[91m{}================={}===================\033[0m'.format('# ' if DRY_RUN else '',
-                                        ' {} '.format(task_instance.definition.name) if task_instance.definition.name else ''))
+        info_str = '\033[1m\033[91m{}================={}===================\033[0m'.format(
+                '# ' if DRY_RUN else '',
+                ' {} '.format(task_instance.definition.name) if task_instance.definition.name else ''
+        )
+        subprocess.run(args=[f'echo "{info_str}"'], shell=True)
+
         try:
             for command in self.commands:
                 command = command.strip()
@@ -27,9 +31,10 @@ class CliExecutor:
                     command = command[1:]
                     print_cmd = DRY_RUN
                 if print_cmd:
-                    print('\033[1m\033[1;33m{}\033[0m\033[0;33m{}\033[0m'.format('' if DRY_RUN else 'Running command: ', command))
+                    info_str = '\033[1m\033[1;33m{}\033[0m\033[0;33m{}\033[0m'.format('' if DRY_RUN else 'Running command: ', command)
+                    subprocess.run(args=[f'echo "{info_str}"'], shell=True)
                 if not DRY_RUN:
-                    p = subprocess.run(args=[command], shell=True, stdout=sys.stdout, stderr=sys.stderr)
+                    p = subprocess.run(args=[command], shell=True)
                     if p.returncode != 0:
                         raise RuntimeError('Failure in task: {} command: {}'.format(str(task_instance.definition), p))
                     res.append(p.returncode)

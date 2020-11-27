@@ -171,8 +171,8 @@ gpu_task1 = TaskDefinition(
     actions=[
         #  '~/.anaconda/bin/python  -c \'import tensorflow as tf; print(1); tf.test.gpu_device_name()\'',
         'echo 1',
-        'sleep 30s',
-        '/usr/local/cuda/extras/demo_suite/deviceQuery  | egrep "Bus ID|NumDevs"',
+        'sleep 10s',
+        'python -c \'import torch; print(torch.cuda.device_count())\'',
     ],
     resources={'GPU':1}
 )
@@ -183,8 +183,8 @@ gpu_task2 = TaskDefinition(
     actions=[
         #  '~/.anaconda/bin/python  -c \'import tensorflow as tf; print(2); tf.test.gpu_device_name()\'',
         'echo 2',
-        'sleep 30s',
-        '/usr/local/cuda/extras/demo_suite/deviceQuery  | egrep "Bus ID|NumDevs"',
+        'sleep 10s',
+        'python -c \'import torch; print(torch.cuda.device_count())\'',
     ],
     resources={'GPU':2}
 )
@@ -195,8 +195,8 @@ gpu_task3 = TaskDefinition(
     actions=[
         #  '~/.anaconda/bin/python  -c \'import tensorflow as tf; print(3); tf.test.gpu_device_name()\'',
         'echo 3',
-        'sleep 30s',
-        '/usr/local/cuda/extras/demo_suite/deviceQuery  | egrep "Bus ID|NumDevs"',
+        'sleep 10s',
+        'python -c \'import torch; print(torch.cuda.device_count())\'',
     ],
     resources={'GPU':3}
 )
@@ -207,7 +207,7 @@ gpu_task4 = TaskDefinition(
     actions=[
         'echo {p}',
         'sleep 10s',
-        '/usr/local/cuda/extras/demo_suite/deviceQuery  | egrep "Bus ID|NumDevs"',
+        'python -c \'import torch; print(torch.cuda.device_count())\'',
     ],
     resources={'GPU':1}
 )

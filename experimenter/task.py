@@ -8,10 +8,9 @@ import os
 import shutil
 from functools import partial
 
-from . import cluster
+from experimenter.cluster.rpyc_cluster import GPU
 
 from experimenter import executor
-from experimenter import scheduler
 
 
 logger = logging.getLogger(__name__)
@@ -34,8 +33,8 @@ class TaskDefinition:
         self.executor = executor
         self.outputs = outputs
         self.resources = resources if resources is not None else {}
-        if cluster.GPU in self.resources:
-            self.resources['GPU_{}'.format(self.resources[cluster.GPU])] = 1
+        if GPU in self.resources:
+            self.resources['GPU_{}'.format(self.resources[GPU])] = 1
 
     def __str__(self):
         return '{}: {} {}'.format(self.name, self.params, self.patterns)
@@ -235,12 +234,12 @@ class TaskInstance:
 
 class TaskPool:
 
-    def __init__(self, tasks, main=None):
+    def __init__(self, tasks, scheduler, main=None):
         self.tasks = tasks
         self.named_tasks = {task.name: task for task in tasks if task.name is not None}
         self.main = main
         self.task_instances = dict()
-        self.scheduler = None
+        self.scheduler = scheduler
 
         self._patterns = list()
         for task in tasks:
@@ -251,7 +250,7 @@ class TaskPool:
                 self._patterns.append((re.compile('^{}$'.format(dep)), task))
 
     @staticmethod
-    def init_from_py(file, variables=None):
+    def init_from_py(file, scheduler, variables=None):
         vars = dict()
         vars['load'] = load
         vars['var'] = var
@@ -275,7 +274,7 @@ class TaskPool:
         main_task = None
         if 'main' in vars:
             main_task = vars['main']
-        return TaskPool(tasks, main=main_task)
+        return TaskPool(tasks, scheduler, main=main_task)
 
     def lookup_task_by_pattern(self, name):
         found = [(task, pattern) for pattern, task in self._patterns if pattern.match(name) is not None]
@@ -309,8 +308,7 @@ class TaskPool:
 
         return res
 
-    def execute(self, task=None, dry_run=False, force_run=False, wait_for_unfinished=True,
-                num_workers=1):
+    def execute(self, task=None, dry_run=False, force_run=False):
         if task is None:
             task = self.main
 
@@ -324,9 +322,7 @@ class TaskPool:
 
         print('\033[1m\033[91m{}Number of tasks to run: {}\033[0m'.format('# ' if dry_run else '', len(self.task_instances)))
         executor.DRY_RUN = dry_run
-        sched = scheduler.LocalScheduler(num_processes=num_workers,
-                                         wait_for_unfinished=wait_for_unfinished)
-        sched.execute(exec_nodes)
+        self.scheduler.execute(exec_nodes)
 
 
 # FIXME the useage of these methods is not at all elegant

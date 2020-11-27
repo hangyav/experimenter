@@ -7,9 +7,9 @@ import logging
 import os
 import sys
 import signal
-from dask.distributed import Client
 
 from experimenter.task import TaskPool
+from experimenter import scheduler
 
 def getArguments():
   parser = argparse.ArgumentParser()
@@ -46,7 +46,17 @@ if __name__ == '__main__':
             raise ValueError('{} does not exists!'.format(file))
         file = os.path.abspath(file)
 
-        task_pool = TaskPool.init_from_py(file, args.variables)
+        if args.cluster is None:
+            if args.threads == 1:
+                sched = scheduler.LocalScheduler()
+            else:
+                sched = scheduler.LocalParallelScheduler(num_processes=args.threads,
+                                                wait_for_unfinished=args.wait_for_unfinished!=0)
+        else:
+                sched = scheduler.RPyCScheduler(args.cluster, wait_for_unfinished=args.wait_for_unfinished!=0)
+
+
+        task_pool = TaskPool.init_from_py(file, sched, args.variables)
 
         def signal_handler(signal, frame):
             # TODO do not print exceptions in worker processes
@@ -60,14 +70,7 @@ if __name__ == '__main__':
         if main is not None:
             task_pool.main = main
 
-        client = None
-        if args.cluster is not None and not args.dry_run:
-            client = Client(args.cluster)
-        #  task_pool.client = client
-
-        task_pool.execute(dry_run=args.dry_run, force_run=args.force_run,
-                          num_workers=args.threads,
-                          wait_for_unfinished=args.wait_for_unfinished!=0)
+        task_pool.execute(dry_run=args.dry_run, force_run=args.force_run)
 
     except BaseException as e:
         if debug > 0:

@@ -12,21 +12,23 @@ from experimenter.task import TaskPool
 from experimenter import scheduler
 
 def getArguments():
-  parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser()
 
-  parser.add_argument('-f', '--file', type=str, default='experiment.py', help='File that contains tasks.')
-  parser.add_argument('-m', '--main', type=str, default=None, nargs='*', help='Tasks to execute.')
-  parser.add_argument('-t', '--threads', type=int, default=1, help='Number of threads to Use.')
-  parser.add_argument('--debug', type=int, default=0, help='Debug mode.')
-  parser.add_argument('--log_level', type=str, default='WARNING', help='{NOTSET|DEBUNG|INFO|WARNING|ERROR|CRITICAL}')
-  parser.add_argument('-v', '--variables', type=str, default=None, nargs='*', help='Tasks to execute.')
-  parser.add_argument('-d', '--dry_run', type=int, default=0, help='Do not run any task if non-zero.')
-  parser.add_argument('--force_run', type=int, default=0, help='Force running all tasks even if output exists (combine with dry_run to print commands for full experiment).')
-  parser.add_argument('--wait_for_unfinished', type=int, default=1, help='Wait for unfunished tasks upon exception.')
-  parser.add_argument('-c', '--cluster', type=str, default=None, help='Use cluster')
-  parser.add_argument('-cp', '--cluster_params', type=str, default=None, nargs='*', help='Cluster parameters separated by semicolon.')
+    parser.add_argument('-f', '--file', type=str, default='experiment.py', help='File that contains tasks.')
+    parser.add_argument('-m', '--main', type=str, default=None, nargs='*', help='Tasks to execute.')
+    parser.add_argument('-t', '--threads', type=int, default=1, help='Number of threads to Use.')
+    parser.add_argument('--memory', type=str, default='1000G', help='Amount of available memory.')
+    parser.add_argument('--gpus', type=str, default=[], nargs='*', help='GPU indices')
+    parser.add_argument('--debug', type=int, default=0, help='Debug mode.')
+    parser.add_argument('--log_level', type=str, default='WARNING', help='{NOTSET|DEBUNG|INFO|WARNING|ERROR|CRITICAL}')
+    parser.add_argument('-v', '--variables', type=str, default=None, nargs='*', help='Tasks to execute.')
+    parser.add_argument('-d', '--dry_run', type=int, default=0, help='Do not run any task if non-zero.')
+    parser.add_argument('--force_run', type=int, default=0, help='Force running all tasks even if output exists (combine with dry_run to print commands for full experiment).')
+    parser.add_argument('--wait_for_unfinished', type=int, default=1, help='Wait for unfunished tasks upon exception.')
+    parser.add_argument('-c', '--cluster', type=str, default=None, help='Use cluster')
+    parser.add_argument('-cp', '--cluster_params', type=str, default=None, nargs='*', help='Cluster parameters separated by semicolon.')
 
-  return parser.parse_args()
+    return parser.parse_args()
 
 
 if __name__ == '__main__':
@@ -47,12 +49,27 @@ if __name__ == '__main__':
             raise ValueError('{} does not exists!'.format(file))
         file = os.path.abspath(file)
 
-        if args.cluster is None or args.dry_run:
-            if args.threads == 1 or args.dry_run:
+        sched = None
+        if args.dry_run:
+            sched = scheduler.LocalScheduler()
+        elif args.cluster is None and args.cluster_params is None:
+            if args.threads == 1:
+                # TODO do this nicer
+                os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(args.gpus)
                 sched = scheduler.LocalScheduler()
             else:
-                sched = scheduler.LocalParallelScheduler(num_processes=args.threads,
-                                                wait_for_unfinished=args.wait_for_unfinished !=0 )
+                #  sched = scheduler.LocalParallelScheduler(num_processes=args.threads,
+                #                                  wait_for_unfinished=args.wait_for_unfinished !=0 )
+                resource_params =[
+                    f'localhost:resources:CPU:{args.threads}',
+                    f'localhost:resources:MEMORY:{args.memory}',
+                    'localhost:resources:GPU:{}'.format(len(args.gpus)),
+                    'localhost:gpu_indices:{}'.format(','.join(args.gpus)),
+                    'localhost:remote_python:{}'.format(sys.executable),
+                ]
+                sched = scheduler.RPyCScheduler(cluster_config=None,
+                        cluster_custom_config=resource_params,
+                        wait_for_unfinished=args.wait_for_unfinished != 0)
         else:
                 sched = scheduler.RPyCScheduler(cluster_config=args.cluster,
                         cluster_custom_config=args.cluster_params,

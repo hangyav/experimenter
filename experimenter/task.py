@@ -8,12 +8,17 @@ import os
 import shutil
 from functools import partial
 
-from experimenter.cluster.rpyc_cluster import GPU
+from experimenter.cluster.rpyc_cluster import GPU, CPU, MEMORY, canonicalize_resources
 
 from experimenter import executor
 
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_RESOURCES = {
+    CPU: 1,
+    MEMORY: '1M',
+}
 
 class TaskDefinition:
 
@@ -32,7 +37,8 @@ class TaskDefinition:
         self.dependencies = dependencies
         self.executor = executor
         self.outputs = outputs
-        self.resources = resources if resources is not None else {}
+        self.resources = resources if resources is not None else DEFAULT_RESOURCES
+        canonicalize_resources(self.resources)
 
     def __str__(self):
         return '{}: {} {}'.format(self.name, self.params, self.patterns)

@@ -171,8 +171,7 @@ gpu_task1 = TaskDefinition(
     actions=[
         #  '~/.anaconda/bin/python  -c \'import tensorflow as tf; print(1); tf.test.gpu_device_name()\'',
         'echo 1',
-        'sleep 10s',
-        'python -c \'import torch; print(torch.cuda.device_count())\'',
+        'python -c \'import torch; import time; gpus=torch.cuda.device_count(); a=torch.Tensor([1]).to("cuda:0"); time.sleep(10); print(gpus)\'',
     ],
     resources={'GPU':1}
 )
@@ -183,8 +182,7 @@ gpu_task2 = TaskDefinition(
     actions=[
         #  '~/.anaconda/bin/python  -c \'import tensorflow as tf; print(2); tf.test.gpu_device_name()\'',
         'echo 2',
-        'sleep 10s',
-        'python -c \'import torch; print(torch.cuda.device_count())\'',
+        'python -c \'import torch; import time; gpus=torch.cuda.device_count(); a=torch.Tensor([1]).to("cuda:0"); time.sleep(10); print(gpus)\'',
     ],
     resources={'GPU':2}
 )
@@ -195,8 +193,7 @@ gpu_task3 = TaskDefinition(
     actions=[
         #  '~/.anaconda/bin/python  -c \'import tensorflow as tf; print(3); tf.test.gpu_device_name()\'',
         'echo 3',
-        'sleep 10s',
-        'python -c \'import torch; print(torch.cuda.device_count())\'',
+        'python -c \'import torch; import time; gpus=torch.cuda.device_count(); a=torch.Tensor([1]).to("cuda:0"); time.sleep(10); print(gpus)\'',
     ],
     resources={'GPU':3}
 )
@@ -206,8 +203,7 @@ gpu_task4 = TaskDefinition(
     outputs=['runalways'],
     actions=[
         'echo {p}',
-        'sleep 2s',
-        'python -c \'import torch; print(torch.cuda.device_count())\'',
+        'python -c \'import torch; import time; gpus=torch.cuda.device_count(); a=torch.Tensor([1]).to("cuda:0"); time.sleep(2); print(gpus)\'',
     ],
     resources={'GPU':3}
 )

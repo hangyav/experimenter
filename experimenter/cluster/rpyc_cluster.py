@@ -48,6 +48,14 @@ def get_resources(gpu_exclude=None, gpu_max_load=0.05, gpu_max_memory=0.05, gpu_
     return resources
 
 
+MEM_CONVERT = ['K', 'M', 'G', 'T']
+
+def canonicalize_resources(resources):
+    for resource, value in resources.items():
+        if resource == MEMORY and type(value) == str and value[-1] in MEM_CONVERT:
+            resources[MEMORY] = int(float(value[:-1]) * math.pow(1024, MEM_CONVERT.index(value[-1])+1))
+
+
 def run_dill_encoded(what):
     import dill
     fun, args = dill.loads(what)
@@ -180,6 +188,10 @@ class LocalProcess(ProcessConnection):
         #  import sys
         #  sys.stdout = self.stdout
         #  sys.stderr = self.stderr
+        if GPU_INDICES in self.resources:
+                import os
+                os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, self.resources[GPU_INDICES]))
+
         try:
             self.result = func()
         except BaseException as e:
@@ -243,6 +255,7 @@ class RPyCCluster(_base.Executor):
 
     def __init__(self, cluster_config_file=None, cluster_custom_config=None):
         self.cluster_config = RPyCCluster.load_config(cluster_config_file, cluster_custom_config)
+        logger.info(f'Available resource on the cluster: {self.cluster_config}')
         self.used_resources = defaultdict(dict)
         self.lock = Lock()
         self.pending_work_items = list()
@@ -288,20 +301,29 @@ class RPyCCluster(_base.Executor):
                     curr_res = curr_res.setdefault(i, dict())
                 curr_res[items[-2]] = items[-1]
 
-        mem_convert = ['K', 'M', 'G', 'T']
         for server in res.keys():
             if server in LOCAL_SERVER_NAMES:
                 # TODO consider using higher number because this way only 1
                 # process with LOCAL=1 can run
-                res[server][LOCAL] = 1
+                res[server].setdefault('resources', dict())[LOCAL] = 1
 
-            for resource, value in res[server].setdefault('resources', dict()).items():
-                if resource == MEMORY and type(value) == str and value[-1] in mem_convert:
-                    res[server]['resources'][MEMORY] = int(float(value[:-1]) * math.pow(1024, mem_convert.index(value[-1])+1))
+            canonicalize_resources(res[server].setdefault('resources', dict()))
+            if GPU_INDICES in res[server] and type(res[server][GPU_INDICES]) != list:
+                try:
+                    l = len(res[server][GPU_INDICES])
+                    if l == 0:
+                        res[server][GPU_INDICES] = []
+                    else:
+                        res[server][GPU_INDICES] = [res[server][GPU_INDICES]]
+                except TypeError:
+                    res[server][GPU_INDICES] = [res[server][GPU_INDICES]]
+
+
 
         return res
 
     def get_connection_for_resource(self, resources):
+        logger.info(f'Looking for a node for: {resources}')
         selected_res = None
         selected_server = None
         with self.lock:

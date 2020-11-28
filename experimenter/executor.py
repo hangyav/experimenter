@@ -2,7 +2,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import sys
 import subprocess
 import logging
 logger = logging.getLogger(__name__)
@@ -15,6 +14,7 @@ class CliExecutor:
         self.commands = commands
 
     def execute(self, task_instance):
+        import sys
         res = list()
 
         info_str = '\033[1m\033[91m{}================={}===================\033[0m'.format(
@@ -32,9 +32,9 @@ class CliExecutor:
                     print_cmd = DRY_RUN
                 if print_cmd:
                     info_str = '\033[1m\033[1;33m{}\033[0m\033[0;33m{}\033[0m'.format('' if DRY_RUN else 'Running command: ', command)
-                    subprocess.run(args=[f'echo "{info_str}"'], shell=True)
+                    subprocess.run(args=[f'echo "{info_str}"'], shell=True, stdout=sys.stdout, stderr=sys.stderr)
                 if not DRY_RUN:
-                    p = subprocess.run(args=[command], shell=True)
+                    p = subprocess.run(args=[command], shell=True, stdout=sys.stdout, stderr=sys.stderr)
                     if p.returncode != 0:
                         raise RuntimeError('Failure in task: {} command: {}'.format(str(task_instance.definition), p))
                     res.append(p.returncode)

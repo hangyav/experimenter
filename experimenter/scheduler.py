@@ -118,16 +118,17 @@ class LocalParallelScheduler(LocalScheduler):
 
 class RPyCScheduler(LocalScheduler):
 
-    def __init__(self, cluster_config, wait_for_unfinished=True):
+    def __init__(self, cluster_config=None, cluster_custom_config=None, wait_for_unfinished=True):
         super().__init__()
 
         self.cluster_config = cluster_config
+        self.cluster_custom_config = cluster_custom_config
         self.wait_for_unfinished = wait_for_unfinished
 
     def execute(self, nodes):
         nodes = set(nodes)
 
-        with RPyCCluster(self.cluster_config) as pool:
+        with RPyCCluster(self.cluster_config, self.cluster_custom_config) as pool:
 
             exception = False
             futures = list()
@@ -165,6 +166,7 @@ class RPyCScheduler(LocalScheduler):
                 if exception:
                     if self.wait_for_unfinished:
                         logger.warning('Waiting for running tasks to finish after exception...')
+                        pool.shutdown(True, False)
                     else:
                         pool.shutdown(True, True)
                 while len([f for f in futures if not f[0].done()]) > 0:

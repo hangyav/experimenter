@@ -24,6 +24,7 @@ def getArguments():
   parser.add_argument('--force_run', type=int, default=0, help='Force running all tasks even if output exists (combine with dry_run to print commands for full experiment).')
   parser.add_argument('--wait_for_unfinished', type=int, default=1, help='Wait for unfunished tasks upon exception.')
   parser.add_argument('-c', '--cluster', type=str, default=None, help='Use cluster')
+  parser.add_argument('-cp', '--cluster_params', type=str, default=None, nargs='*', help='Cluster parameters separated by semicolon.')
 
   return parser.parse_args()
 
@@ -46,14 +47,16 @@ if __name__ == '__main__':
             raise ValueError('{} does not exists!'.format(file))
         file = os.path.abspath(file)
 
-        if args.cluster is None:
-            if args.threads == 1:
+        if args.cluster is None or args.dry_run:
+            if args.threads == 1 or args.dry_run:
                 sched = scheduler.LocalScheduler()
             else:
                 sched = scheduler.LocalParallelScheduler(num_processes=args.threads,
-                                                wait_for_unfinished=args.wait_for_unfinished!=0)
+                                                wait_for_unfinished=args.wait_for_unfinished !=0 )
         else:
-                sched = scheduler.RPyCScheduler(args.cluster, wait_for_unfinished=args.wait_for_unfinished!=0)
+                sched = scheduler.RPyCScheduler(cluster_config=args.cluster,
+                        cluster_custom_config=args.cluster_params,
+                        wait_for_unfinished=args.wait_for_unfinished != 0)
 
 
         task_pool = TaskPool.init_from_py(file, sched, args.variables)

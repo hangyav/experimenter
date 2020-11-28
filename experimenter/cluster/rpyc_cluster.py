@@ -7,7 +7,7 @@ import math
 import threading
 from collections import defaultdict
 from concurrent.futures import _base
-from multiprocessing import Lock
+from multiprocessing import Lock, Process, Queue
 
 import rpyc
 import dill
@@ -22,6 +22,8 @@ CPU = 'CPU'
 MEMORY = 'MEMORY'
 GPU = 'GPU'
 GPU_INDICES = 'gpu_indices'
+LOCAL = 'LOCAL'
+LOCAL_SERVER_NAMES = ['localhost', '127.0.0.1']
 
 
 def get_resources(gpu_exclude=None, gpu_max_load=0.05, gpu_max_memory=0.05, gpu_memory_free=0,
@@ -59,21 +61,157 @@ class WorkItem():
         self.resources = resources
         self.future = future
         #
-        self.connection = None
+        self.process = None
         self.async_result = None
-        self.used_resources = None
 
+class ProcessConnection():
 
-class RPyCConnection():
-
-    def __init__(self, connection, server, server_name, ssh):
-        self.connection = connection
-        self.server = server
+    def __init__(self, server_name, task_id, resources):
         self.server_name = server_name
-        self.ssh = ssh
+        self.task_id = task_id
+        self.resources = resources
+
+    def monitor_process(self, inp, stream):
+        for line in inp:
+            print('{}-{}-{}: '.format(self.server_name, self.task_id, stream), line.decode('utf-8').strip())
+
+    def start_process_monitor_thread(self):
+        # STDOUT
+        thread = threading.Thread(target=self.monitor_process,
+            args=(self.stdout, 'OUT'),
+        )
+        thread.daemon = False
+        thread.start()
+        # STDERR
+        thread = threading.Thread(target=self.monitor_process,
+            args=(self.stderr, 'ERR'),
+        )
+        thread.daemon = False
+        thread.start()
+
+    @property
+    def stdout(self):
+        raise NotImplementedError
+
+    @property
+    def stderr(self):
+        raise NotImplementedError
+
+    def run_work_item(self, item):
+        raise NotImplementedError
+
+    def stop(self):
+        pass
 
     def __del__(self):
+        self.stop()
+
+
+class QueueWrapper():
+
+    def __init__(self):
+        self.queue = Queue()
+
+    def write(self, obj):
+        print('write')
+        self.queue.put_nowait(obj)
+
+    def __iter__(self):
+        while True:
+            yield self.queue.get(True)
+
+    def fileno(self):
+        print('fileno')
+        return 0
+
+    def close(self):
+        print('close')
+        return
+
+    def read(self):
+        print('read')
+        return ''
+
+
+class LocalProcess(ProcessConnection):
+
+    def __init__(self, server_name, task_id, resources):
+        super().__init__(server_name, task_id, resources)
+
+        self.process = None
+        self.out = QueueWrapper()
+        self.err = QueueWrapper()
+        self.result = None
+
+    def stop(self):
+        if self.process is not None:
+            self.process.terminate()
+
+    @property
+    def stdout(self):
+        return self.out
+
+    @property
+    def stderr(self):
+        return self.err
+
+    @property
+    def ready(self):
+        return not self.process.is_alive()
+
+    @property
+    def value(self):
+        return self.result
+
+    @property
+    def error(self):
+        return isinstance(self.result, Exception)
+
+    def run_work_item(self, item):
+        self.process = Process(target=self.local_process_wrapper, args=(item.function, ))
+        self.process.start()
+        #  self.start_process_monitor_thread()
+
+        item.process = self
+        item.async_result = self
+
+    def local_process_wrapper(self, func):
+        # TODO this doesn't work
+        #  import sys
+        #  sys.stdout = self.stdout
+        #  sys.stderr = self.stderr
+        try:
+            self.result = func()
+        except BaseException as e:
+            self.results = e
+
+class RPyCConnection(ProcessConnection):
+
+    def __init__(self, server_name, task_id, resources, cluster_config):
+        super().__init__(server_name, task_id, resources)
+
+        logger.info('Initializing connection to {}...'.format(server_name))
+        self.ssh = SshMachine(server_name,
+                       user=cluster_config[server_name].setdefault('ssh_username', None),
+                       port=cluster_config[server_name].setdefault('ssh_port', None),
+                       keyfile=cluster_config[server_name].setdefault('ssh_private_key', None),
+                       password=cluster_config[server_name].setdefault('ssh_password', None))
+
+        cmd = cluster_config[server_name].setdefault('remote_python', None)
+        setup = ''
+        if GPU_INDICES in resources and len(resources[GPU_INDICES]) > 0:
+            setup = 'os.environ[\'CUDA_VISIBLE_DEVICES\'] = \'{}\''.format(','.join([str(i) for i in resources[GPU_INDICES]]))
+
+        logger.info('Command: {}, Setup: {}'.format(cmd, setup))
+
+        self.server = DeployedServer(self.ssh, python_executable=cmd, server_class='rpyc.utils.server.OneShotServer',
+                           extra_setup=setup)
+        self.connection = self.server.classic_connect()
+
+    def stop(self):
+        self.connection.close()
         self.server.close()
+        self.ssh.close()
 
     @property
     def modules(self):
@@ -82,6 +220,23 @@ class RPyCConnection():
     @property
     def teleport(self):
         return self.connection.teleport
+
+    @property
+    def stdout(self):
+        return self.server.proc.stdout
+
+    @property
+    def stderr(self):
+        return self.server.proc.stderr
+
+    def run_work_item(self, item):
+        self.start_process_monitor_thread()
+
+        func = self.connection.teleport(run_dill_encoded)
+        result = rpyc.async_(func)(dill.dumps((item.function, [])))
+
+        item.process = self
+        item.async_result = result
 
 
 class RPyCCluster(_base.Executor):
@@ -95,6 +250,7 @@ class RPyCCluster(_base.Executor):
         self.sentry_thread = None
         self.new_work_item_event = threading.Event()
         self.shutdown_flag = 0
+        self.num_overall_connections = 0
 
     @staticmethod
     def load_config(file=None, custom=None):
@@ -134,6 +290,11 @@ class RPyCCluster(_base.Executor):
 
         mem_convert = ['K', 'M', 'G', 'T']
         for server in res.keys():
+            if server in LOCAL_SERVER_NAMES:
+                # TODO consider using higher number because this way only 1
+                # process with LOCAL=1 can run
+                res[server][LOCAL] = 1
+
             for resource, value in res[server].setdefault('resources', dict()).items():
                 if resource == MEMORY and type(value) == str and value[-1] in mem_convert:
                     res[server]['resources'][MEMORY] = int(float(value[:-1]) * math.pow(1024, mem_convert.index(value[-1])+1))
@@ -158,7 +319,7 @@ class RPyCCluster(_base.Executor):
                 self.add_used(selected_server, selected_res)
 
         if selected_server is not None:
-            return self.get_connection(selected_server, selected_res), selected_res
+            return self.get_connection(selected_server, selected_res)
 
         return None
 
@@ -217,25 +378,11 @@ class RPyCCluster(_base.Executor):
                 raise e
 
     def get_connection(self, server, resources):
-        logger.info('Initializing connection to {}...'.format(server))
-        m = SshMachine(server,
-                       user=self.cluster_config[server].setdefault('ssh_username', None),
-                       port=self.cluster_config[server].setdefault('ssh_port', None),
-                       keyfile=self.cluster_config[server].setdefault('ssh_private_key', None),
-                       password=self.cluster_config[server].setdefault('ssh_password', None))
-
-        cmd = self.cluster_config[server].setdefault('remote_python', None)
-        setup = ''
-        if GPU_INDICES in resources and len(resources[GPU_INDICES]) > 0:
-            setup = 'os.environ[\'CUDA_VISIBLE_DEVICES\'] = \'{}\''.format(','.join([str(i) for i in resources[GPU_INDICES]]))
-
-        logger.info('Command: {}, Setup: {}'.format(cmd, setup))
-
-        s = DeployedServer(m, python_executable=cmd, server_class='rpyc.utils.server.OneShotServer',
-                           extra_setup=setup)
-        c = s.classic_connect()
-
-        connection = RPyCConnection(c, s, server, m)
+        if server in LOCAL_SERVER_NAMES or LOCAL in resources:
+            connection = LocalProcess(server, self.num_overall_connections, resources)
+        else:
+            connection = RPyCConnection(server, self.num_overall_connections, resources, self.cluster_config)
+        self.num_overall_connections += 1
 
         return connection
 
@@ -285,11 +432,10 @@ class RPyCCluster(_base.Executor):
     def start_sentry_thread(self):
         if self.sentry_thread is None:
             self.sentry_thread = threading.Thread(target=self.sentry_fn)
-            self.sentry_thread.daemon = True
+            self.sentry_thread.daemon = False
             self.sentry_thread.start()
 
     def sentry_fn(self):
-        task_idx = 0
         while True:
             # clean up finished items
             to_pop = list()
@@ -303,14 +449,14 @@ class RPyCCluster(_base.Executor):
                     else:
                         item.future.set_result(item.async_result.value)
 
-                    self.free_up_resources(item.connection.server_name, item.used_resources)
-                    item.connection.server.close()
+                    self.free_up_resources(item.process.server_name, item.process.resources)
+                    item.process.stop()
                     to_pop.append(i)
                 elif self.shutdown_flag > 1:
                     # TODO connection is not interrupted
                     item.future.set_exception(InterruptedError('Interrupted by user'))
-                    self.free_up_resources(item.connection.server_name, item.used_resources)
-                    item.connection.server.close()
+                    self.free_up_resources(item.process.server_name, item.process.resources)
+                    item.process.stop()
                     to_pop.append(i)
 
             for i in to_pop[::-1]:
@@ -323,24 +469,12 @@ class RPyCCluster(_base.Executor):
                     to_pop.append(i)
                     continue
 
-                conn_obj = self.get_connection_for_resource(item.resources)
+                connection = self.get_connection_for_resource(item.resources)
 
-                if conn_obj is not None:
-                    connection = conn_obj[0]
-                    resources = conn_obj[1]
-                    self.start_process_monitor_thread(connection, task_idx)
-                    task_idx +=1
-
-                    fn = connection.teleport(run_dill_encoded)
-                    res = rpyc.async_(fn)(dill.dumps((item.function, [])))
-
-                    item.connection = connection
-                    item.used_resources = resources
-                    item.async_result = res
-
+                if connection is not None:
+                    connection.run_work_item(item)
                     to_pop.append(i)
                     self.running_work_items.append(item)
-
 
             for i in to_pop[::-1]:
                 self.pending_work_items.pop(i)
@@ -352,28 +486,6 @@ class RPyCCluster(_base.Executor):
             self.new_work_item_event.clear()
 
         self.new_work_item_event.set()
-
-    @staticmethod
-    def monitor_process(info, inp):
-        for line in inp:
-            print(f'{info}: '.format(), line.decode('utf-8').strip())
-
-    @staticmethod
-    def start_process_monitor_thread(connection, task_idx):
-        # STDOUT
-        thread = threading.Thread(target=RPyCCluster.monitor_process, args=(
-            '{}-{}-{}'.format(connection.server_name, task_idx, 'OUT'),
-            connection.server.proc.stdout,)
-            )
-        thread.daemon = False
-        thread.start()
-        # STDERR
-        thread = threading.Thread(target=RPyCCluster.monitor_process, args=(
-            '{}-{}-{}'.format(connection.server_name, task_idx, 'ERR'),
-            connection.server.proc.stderr,)
-            )
-        thread.daemon = False
-        thread.start()
 
 
 def getArguments():
@@ -390,7 +502,7 @@ if __name__ == '__main__':
 
 
     cluster = RPyCCluster(cluster_config_file=args.cluster, cluster_custom_config=args.cluster_params)
-    c, _ = cluster.get_connection_for_resource({CPU: 1, GPU: 3})
+    c = cluster.get_connection_for_resource({CPU: 1, GPU: 3})
     print(c.modules.sys.executable)
     print(c.modules.os.environ)
     res = c.teleport(get_resources)

@@ -206,8 +206,8 @@ gpu_task4 = TaskDefinition(
     outputs=['runalways'],
     actions=[
         'echo {p}',
-        'sleep 10s',
+        'sleep 2s',
         'python -c \'import torch; print(torch.cuda.device_count())\'',
     ],
-    resources={'GPU':1}
+    resources={'GPU':3}
 )

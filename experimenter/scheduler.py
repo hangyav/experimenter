@@ -4,7 +4,7 @@ from __future__ import print_function
 
 from concurrent.futures import ProcessPoolExecutor
 from threading import Event
-from experimenter.cluster.rpyc_cluster import RPyCCluster
+from experimenter.cluster.rpyc_cluster import RPyCCluster, RPyCAdaptiveCluster
 
 import logging
 logger = logging.getLogger(__name__)
@@ -118,17 +118,19 @@ class LocalParallelScheduler(LocalScheduler):
 
 class RPyCScheduler(LocalScheduler):
 
-    def __init__(self, cluster_config=None, cluster_custom_config=None, wait_for_unfinished=True):
+    def __init__(self, cluster_config=None, cluster_custom_config=None,
+                 wait_for_unfinished=True, adaptive=True):
         super().__init__()
 
         self.cluster_config = cluster_config
         self.cluster_custom_config = cluster_custom_config
         self.wait_for_unfinished = wait_for_unfinished
+        self.cluster = RPyCAdaptiveCluster if adaptive else RPyCCluster
 
     def execute(self, nodes):
         nodes = set(nodes)
 
-        with RPyCCluster(self.cluster_config, self.cluster_custom_config) as pool:
+        with self.cluster(self.cluster_config, self.cluster_custom_config) as pool:
 
             exception = False
             futures = list()

@@ -16,7 +16,7 @@ def getArguments():
 
     parser.add_argument('-f', '--file', type=str, default='experiment.py', help='File that contains tasks.')
     parser.add_argument('-m', '--main', type=str, default=None, nargs='*', help='Tasks to execute.')
-    parser.add_argument('-t', '--threads', type=int, default=1, help='Number of threads to Use.')
+    parser.add_argument('-t', '--threads', type=int, default=None, help='Number of threads to Use.')
     parser.add_argument('--memory', type=str, default='1000G', help='Amount of available memory.')
     parser.add_argument('--gpus', type=str, default=[], nargs='*', help='GPU indices')
     parser.add_argument('--debug', type=int, default=0, help='Debug mode.')
@@ -27,6 +27,7 @@ def getArguments():
     parser.add_argument('--wait_for_unfinished', type=int, default=1, help='Wait for unfunished tasks upon exception.')
     parser.add_argument('-c', '--cluster', type=str, default=None, help='Use cluster')
     parser.add_argument('-cp', '--cluster_params', type=str, default=None, nargs='*', help='Cluster parameters separated by semicolon.')
+    parser.add_argument('--adaptive_cluster', type=int, default=1, help='Use adaptive cluster or not.')
 
     return parser.parse_args()
 
@@ -42,6 +43,9 @@ if __name__ == '__main__':
 
     logging.basicConfig(level=logging._nameToLevel[log_level])
     logger = logging.getLogger(__name__)
+
+    if args.threads is None and args.cluster is None and args.cluster_params is None:
+        args.threads = 1
 
     try:
         file = args.file
@@ -69,11 +73,13 @@ if __name__ == '__main__':
                 ]
                 sched = scheduler.RPyCScheduler(cluster_config=None,
                         cluster_custom_config=resource_params,
-                        wait_for_unfinished=args.wait_for_unfinished != 0)
+                        wait_for_unfinished=args.wait_for_unfinished != 0,
+                        adaptive=args.adaptive_cluster > 0)
         else:
                 sched = scheduler.RPyCScheduler(cluster_config=args.cluster,
                         cluster_custom_config=args.cluster_params,
-                        wait_for_unfinished=args.wait_for_unfinished != 0)
+                        wait_for_unfinished=args.wait_for_unfinished != 0,
+                        adaptive=args.adaptive_cluster > 0)
 
 
         task_pool = TaskPool.init_from_py(file, sched, args.variables)

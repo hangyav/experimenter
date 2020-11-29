@@ -26,28 +26,6 @@ LOCAL = 'LOCAL'
 LOCAL_SERVER_NAMES = ['localhost', '127.0.0.1']
 
 
-def get_resources(gpu_exclude=None, gpu_max_load=0.05, gpu_max_memory=0.05, gpu_memory_free=0,
-                  cpu_load_idx=1):
-    import GPUtil
-    import psutil
-
-    resources = dict()
-
-    num_cpus = psutil.cpu_count()
-    load = int(psutil.getloadavg()[cpu_load_idx])
-    resources['CPU'] = num_cpus - min(num_cpus, load)
-
-    resources['MEMORY'] = psutil.virtual_memory().available
-
-    if gpu_exclude is None:
-        gpu_exclude = list()
-    gpus = GPUtil.getAvailable(maxLoad=gpu_max_load, maxMemory=gpu_max_memory,
-                               excludeID=gpu_exclude, memoryFree=gpu_memory_free,
-                               limit=1000000)
-    resources['GPU'] = gpus
-    return resources
-
-
 MEM_CONVERT = ['K', 'M', 'G', 'T']
 
 def canonicalize_resources(resources):
@@ -389,15 +367,16 @@ class RPyCCluster(_base.Executor):
                 self.used_resources[server][resource] += value
 
     def free_up_resources(self, server, resources):
-        for resource, value in resources.items():
-            try:
-                if resource == GPU_INDICES:
-                    self.used_resources[server][resource] -= set(value)
-                else:
-                    self.used_resources[server][resource] -= value
-            except BaseException as e:
-                print(server, resource, value, self.used_resources)
-                raise e
+        with self.lock:
+            for resource, value in resources.items():
+                try:
+                    if resource == GPU_INDICES:
+                        self.used_resources[server][resource] -= set(value)
+                    else:
+                        self.used_resources[server][resource] -= value
+                except BaseException as e:
+                    print(server, resource, value, self.used_resources)
+                    raise e
 
     def get_connection(self, server, resources):
         if server in LOCAL_SERVER_NAMES or LOCAL in resources:
@@ -510,6 +489,129 @@ class RPyCCluster(_base.Executor):
         self.new_work_item_event.set()
 
 
+class RPyCAdaptiveCluster(RPyCCluster):
+
+    def __init__(self, cluster_config_file=None, cluster_custom_config=None):
+        super().__init__(cluster_config_file=cluster_config_file,
+                cluster_custom_config=cluster_custom_config)
+
+        self.current_available_resources = dict()
+        self.resource_event = threading.Event()
+
+        self.resource_monitor_thread = threading.Thread(target=self.resource_monitor_fn)
+        self.resource_monitor_thread.daemon = False
+        self.resource_monitor_thread.start()
+
+    def resource_monitor_fn(self):
+        connections =defaultdict(dict)
+        while self.shutdown_flag == 0:
+            for server, _ in sorted(self.cluster_config.items(), reverse=True,
+                    key=lambda x:x[1].setdefault('priority', 0)):
+                if server not in connections:
+                    if server in LOCAL_SERVER_NAMES:
+                        conn = None
+                        fn = RPyCAdaptiveCluster.get_node_resources
+                    else:
+                        logger.info(f'Initializing resource monitor connection to: {server}')
+                        conn = RPyCConnection(server, 'monitor', {}, self.cluster_config)
+                        fn = conn.teleport(RPyCAdaptiveCluster.get_node_resources)
+
+                    connections[server] = (conn, fn)
+
+                with self.lock:
+                    self.current_available_resources[server] = connections[server][1]()
+
+            logger.info('Current available resources: {}'.format(self.current_available_resources))
+            self.resource_event.wait(10)
+            self.resource_event.clear()
+
+    def get_available_resources(self):
+        res = defaultdict(dict)
+
+        for server, _ in sorted(self.cluster_config.items(), reverse=True,
+                                     key=lambda x:x[1].setdefault('priority', 0)):
+            params = self.get_minimum_resource(server)
+            for resource, amount in params['resources'].items():
+                res[server][resource] = amount - self.used_resources.setdefault(
+                                                server, dict()
+                                                ).setdefault(resource, 0)
+
+            res[server][GPU_INDICES] = sorted(
+                set(params.setdefault(GPU_INDICES, list()))
+                - self.used_resources.setdefault(server, dict()).setdefault(GPU_INDICES, set())
+            )
+
+        return res
+
+    def get_minimum_resource(self, server):
+        if server not in self.current_available_resources:
+            # server was not checked yet:
+            return {'resources': dict()}
+
+        results = dict()
+        all_res = self.cluster_config[server]
+        used_res = self.used_resources.setdefault(server, dict())
+        curr_res = self.current_available_resources[server]
+
+        for resource, value in all_res['resources'].items():
+            if resource in curr_res['resources']:
+                results.setdefault('resources', dict())[resource] = min(
+                        value,
+                        curr_res['resources'][resource],
+                        value - used_res.setdefault('resources', dict()).setdefault(resource, 0)  # in case the running process actually uses less than it required
+                        ) + used_res.setdefault('resources', dict()).setdefault(resource, 0)  # we add the used resources to compensate the subtraction later
+            else:
+                results.setdefault('resources', dict())[resource] = value
+
+        # If a resource is not defined for the server then don't add it even
+        # it it is measurable
+        #  for resource, value in curr_res['resources'].items():
+        #      if resource not in curr_res.setdefault('resources', dict()):
+        #          results.setdefault('resources', dict())[resource] = value
+
+        results[GPU_INDICES] = sorted(
+            set(all_res.setdefault(GPU_INDICES, list()))
+            & set(curr_res.setdefault(GPU_INDICES, list()))
+        )
+
+        return results
+
+    def free_up_resources(self, server, resources):
+        with self.lock:
+            for resource, value in resources.items():
+                try:
+                    if resource == GPU_INDICES:
+                        self.used_resources[server][resource] -= set(value)
+                    else:
+                        self.used_resources[server][resource] -= value
+                except BaseException as e:
+                    print(server, resource, value, self.used_resources)
+                    raise e
+
+    @staticmethod
+    def get_node_resources(gpu_exclude=None, gpu_max_load=0.05, gpu_max_memory=0.05, gpu_memory_free=0,
+                      cpu_load_idx=1):
+        import GPUtil
+        import psutil
+
+        resources = dict()
+
+        num_cpus = psutil.cpu_count()
+        load = int(psutil.getloadavg()[cpu_load_idx])
+        resources.setdefault('resources', dict())['CPU'] = num_cpus - min(num_cpus, load)
+
+        resources.setdefault('resources', dict())['MEMORY'] = psutil.virtual_memory().available
+
+        if gpu_exclude is None:
+            gpu_exclude = list()
+        gpus = GPUtil.getAvailable(maxLoad=gpu_max_load, maxMemory=gpu_max_memory,
+                                   excludeID=gpu_exclude, memoryFree=gpu_memory_free,
+                                   limit=1000000)
+        resources['gpu_indices'] = gpus
+        resources.setdefault('resources', dict())['GPU'] = len(gpus)
+        return resources
+
+
 def getArguments():
   parser = argparse.ArgumentParser()
   parser.add_argument('-c', '--cluster', type=str, default=None,  help='Cluster definition file')
@@ -527,6 +629,6 @@ if __name__ == '__main__':
     c = cluster.get_connection_for_resource({CPU: 1, GPU: 3})
     print(c.modules.sys.executable)
     print(c.modules.os.environ)
-    res = c.teleport(get_resources)
+    res = c.teleport(RPyCAdaptiveCluster.get_node_resources)
 
     print('Resources: ', res())

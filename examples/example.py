@@ -207,3 +207,13 @@ gpu_task4 = TaskDefinition(
     ],
     resources={'GPU':3}
 )
+
+##############################################################
+
+progress_bar_task = TaskDefinition(
+    actions=[
+        #  'python -c \'from tqdm import tqdm; import time; list(tqdm((i for i in range(10) )))\'',
+        'seq 100000000 | tqdm > /dev/null'
+    ],
+)
+

@@ -57,9 +57,40 @@ class ProcessConnection():
         self.task_id = task_id
         self.resources = resources
 
+    @staticmethod
+    def input_stream_iterator(inp, size=10):
+        def get_separator_idx(buf):
+            cr_idx = -1
+            nl_idx = -1
+            if '\r' in buf:
+                cr_idx = buf.index('\r')
+            if '\n' in buf:
+                nl_idx = buf.index('\n')
+
+            if cr_idx != -1 and nl_idx != -1:
+                return min(cr_idx, nl_idx)
+            return max(cr_idx, nl_idx)
+
+        buf = ''
+        while True:
+            line = inp.read(size)
+            if not line:
+                break
+            line = line.decode('utf-8')
+            buf += line
+
+            idx = get_separator_idx(buf)
+            if idx != -1:
+                yield buf[:idx+1]
+                buf = buf[idx+1:]
+
+        if len(buf) > 0:
+            yield '{}\n'.format(buf.rstrip())
+
+
     def monitor_process(self, inp, stream):
-        for line in inp:
-            print('{}-{}-{}: '.format(self.server_name, self.task_id, stream), line.decode('utf-8').strip())
+        for line in ProcessConnection.input_stream_iterator(inp):
+            print('{}-{}-{}: '.format(self.server_name, self.task_id, stream), line, end='')
 
     def start_process_monitor_thread(self):
         # STDOUT
@@ -283,7 +314,7 @@ class RPyCCluster(_base.Executor):
             if server in LOCAL_SERVER_NAMES:
                 # TODO consider using higher number because this way only 1
                 # process with LOCAL=1 can run
-                res[server].setdefault('resources', dict())[LOCAL] = 1
+                res[server].setdefault('resources', dict())[LOCAL] = 10000
 
             canonicalize_resources(res[server].setdefault('resources', dict()))
             if GPU_INDICES in res[server] and type(res[server][GPU_INDICES]) != list:
@@ -306,6 +337,7 @@ class RPyCCluster(_base.Executor):
         selected_server = None
         with self.lock:
             available_res = self.get_available_resources()
+            logger.info('Availabe resources: {}'.format(available_res))
             for server, res in available_res.items():
                 selected_res = RPyCCluster.get_resource_setup(resources, res)
                 if selected_res is not None:
@@ -367,6 +399,7 @@ class RPyCCluster(_base.Executor):
                 self.used_resources[server][resource] += value
 
     def free_up_resources(self, server, resources):
+        logger.debug(f'Freeing up resources on {server}: {resources}')
         with self.lock:
             for resource, value in resources.items():
                 try:
@@ -485,6 +518,7 @@ class RPyCCluster(_base.Executor):
 
             self.new_work_item_event.wait(1)
             self.new_work_item_event.clear()
+            logger.debug('RPyCCluster sentry thread PING')
 
         self.new_work_item_event.set()
 
@@ -522,6 +556,7 @@ class RPyCAdaptiveCluster(RPyCCluster):
                     self.current_available_resources[server] = connections[server][1]()
 
             logger.info('Current available resources: {}'.format(self.current_available_resources))
+            logger.info('Current used resources: {}'.format(self.used_resources))
             self.resource_event.wait(10)
             self.resource_event.clear()
 
@@ -558,8 +593,8 @@ class RPyCAdaptiveCluster(RPyCCluster):
                 results.setdefault('resources', dict())[resource] = min(
                         value,
                         curr_res['resources'][resource],
-                        value - used_res.setdefault('resources', dict()).setdefault(resource, 0)  # in case the running process actually uses less than it required
-                        ) + used_res.setdefault('resources', dict()).setdefault(resource, 0)  # we add the used resources to compensate the subtraction later
+                        value - used_res.setdefault(resource, 0)  # in case the running process actually uses less than it required
+                        ) + used_res.setdefault(resource, 0)  # we add the used resources to compensate the subtraction later
             else:
                 results.setdefault('resources', dict())[resource] = value
 
@@ -575,18 +610,6 @@ class RPyCAdaptiveCluster(RPyCCluster):
         )
 
         return results
-
-    def free_up_resources(self, server, resources):
-        with self.lock:
-            for resource, value in resources.items():
-                try:
-                    if resource == GPU_INDICES:
-                        self.used_resources[server][resource] -= set(value)
-                    else:
-                        self.used_resources[server][resource] -= value
-                except BaseException as e:
-                    print(server, resource, value, self.used_resources)
-                    raise e
 
     @staticmethod
     def get_node_resources(gpu_exclude=None, gpu_max_load=0.05, gpu_max_memory=0.05, gpu_memory_free=0,

@@ -58,7 +58,7 @@ class ProcessConnection():
         self.resources = resources
 
     @staticmethod
-    def input_stream_iterator(inp, size=10):
+    def input_stream_iterator(inp, size=10, max_byte_buffer=100000):
         def get_separator_idx(buf):
             cr_idx = -1
             nl_idx = -1
@@ -72,18 +72,37 @@ class ProcessConnection():
             return max(cr_idx, nl_idx)
 
         buf = ''
+        byte_buf = None
         while True:
             line = inp.read(size)
             if not line:
                 break
-            line = line.decode('utf-8')
-            buf += line
+
+            if byte_buf is not None:
+                line = byte_buf + line
+                byte_buf = None
+
+            try:
+                line = line.decode('utf-8')
+                buf += line
+            except UnicodeDecodeError as e:
+                byte_buf = line
+                logger.debug('Current byte buffer: {}'.format(str(byte_buf)))
+                if len(byte_buf) > max_byte_buffer:
+                    logger.error('Maximum byte buffer size reached: {}'.format(str(byte_buf)))
+                    byte_buf = None
 
             idx = get_separator_idx(buf)
             if idx != -1:
                 yield buf[:idx+1]
                 buf = buf[idx+1:]
 
+        if byte_buf is not None:
+            try:
+                buf += byte_buf.decode('utf-8')
+            except UnicodeDecodeError as e:
+                buf += str(byte_buf)
+                logger.error(e)
         if len(buf) > 0:
             yield '{}\n'.format(buf.rstrip())
 

@@ -33,7 +33,8 @@ class CliExecutor:
                 if print_cmd:
                     info_str = '\033[1m\033[1;33m{}\033[0m\033[0;33m{}\033[0m'.format('' if DRY_RUN else 'Running command: ', command)
                     info_str = info_str.replace('"', '\\"')
-                    subprocess.run(args=[f'echo "{info_str}"'], shell=True, stdout=sys.stdout, stderr=sys.stderr)
+                    #  subprocess.run(args=[f'echo "{info_str}"'], shell=True, stdout=sys.stdout, stderr=sys.stderr)
+                    print(info_str)
                 if not DRY_RUN:
                     p = subprocess.run(args=[command], shell=True, stdout=sys.stdout, stderr=sys.stderr)
                     if p.returncode != 0:

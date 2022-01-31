@@ -273,7 +273,9 @@ class RPyCConnection(ProcessConnection):
         self.start_process_monitor_thread()
 
         func = self.connection.teleport(run_dill_encoded)
+        # FIXME TimeoutError: result expired
         result = rpyc.async_(func)(dill.dumps((item.function, [])))
+        result.set_expiry(None)
 
         item.process = self
         item.async_result = result

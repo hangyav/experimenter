@@ -60,8 +60,9 @@ class TaskDefinition:
         dependencies = list()
         latest_parent_modification = -1.0
         if self.dependencies is not None:
-            for dep_idx, dep in enumerate(self.dependencies):
-                dep = TaskDefinition._get_param(dep, params)
+            dep_lst = TaskDefinition._get_params_from_list(self.dependencies, params)
+            for dep_idx, dep in enumerate(dep_lst):
+                #  dep = TaskDefinition._get_param(dep, params)
 
                 if dep is None:
                     dep = 'None'
@@ -99,7 +100,8 @@ class TaskDefinition:
 
         outputs = list()
         if self.outputs is not None:
-            outputs = [TaskDefinition._get_param(o, params) for o in self.outputs]
+            #  outputs = [TaskDefinition._get_param(o, params) for o in self.outputs]
+            outputs = TaskDefinition._get_params_from_list(self.outputs, params)
             for oidx, o in enumerate(outputs):
                 key = 'OUT{}'.format(oidx)
                 if key in params:
@@ -110,7 +112,8 @@ class TaskDefinition:
 
         tasks = None
         if self.actions is not None:
-            tasks = self.executor([TaskDefinition._get_param(task, params) for task in self.actions])
+            #  tasks = self.executor([TaskDefinition._get_param(task, params) for task in self.actions])
+            tasks = self.executor(TaskDefinition._get_params_from_list(self.actions, params))
 
         ##########################################################
 
@@ -180,6 +183,20 @@ class TaskDefinition:
             return x.format(**params)
         else:
             raise ValueError('Type {} not a supported parameter!'.format(type(x)))
+
+    @staticmethod
+    def _get_params_from_list(lst, params):
+        res = list()
+        for item in lst:
+            expanded = TaskDefinition._get_param(item, params)
+            if expanded is None:
+                continue
+            elif isinstance(expanded, list):
+                res.extend(expanded)
+            else:
+                res.append(expanded)
+
+        return res
 
     @staticmethod
     def _earliest_output_modification_time(outputs, follow_links=True):

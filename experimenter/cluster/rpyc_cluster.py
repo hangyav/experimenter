@@ -23,6 +23,7 @@ MEMORY = 'MEMORY'
 GPU = 'GPU'
 GPU_INDICES = 'gpu_indices'
 LOCAL = 'LOCAL'
+LOCAL_SINGLE = 'LOCAL_SINGLE'
 LOCAL_SERVER_NAMES = ['localhost', '127.0.0.1']
 
 
@@ -333,9 +334,10 @@ class RPyCCluster(_base.Executor):
 
         for server in res.keys():
             if server in LOCAL_SERVER_NAMES:
-                # TODO consider using higher number because this way only 1
-                # process with LOCAL=1 can run
-                res[server].setdefault('resources', dict())[LOCAL] = 10000
+                if LOCAL not in res[server].setdefault('resources', dict()):
+                    res[server]['resources'][LOCAL] = 10000
+                if LOCAL_SINGLE not in res[server]['resources']:
+                    res[server]['resources'][LOCAL_SINGLE] = 1
 
             canonicalize_resources(res[server].setdefault('resources', dict()))
             if GPU_INDICES in res[server] and type(res[server][GPU_INDICES]) != list:
@@ -347,8 +349,6 @@ class RPyCCluster(_base.Executor):
                         res[server][GPU_INDICES] = [res[server][GPU_INDICES]]
                 except TypeError:
                     res[server][GPU_INDICES] = [res[server][GPU_INDICES]]
-
-
 
         return res
 
@@ -537,7 +537,7 @@ class RPyCCluster(_base.Executor):
             if self.shutdown_flag > 0 and len(self.running_work_items) + len(self.pending_work_items) == 0:
                 break
 
-            self.new_work_item_event.wait(1)
+            self.new_work_item_event.wait(0.5)
             self.new_work_item_event.clear()
             logger.debug('RPyCCluster sentry thread PING')
 

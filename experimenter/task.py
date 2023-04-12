@@ -113,7 +113,10 @@ class TaskDefinition:
         tasks = None
         if self.actions is not None:
             #  tasks = self.executor([TaskDefinition._get_param(task, params) for task in self.actions])
-            tasks = self.executor(TaskDefinition._get_params_from_list(self.actions, params))
+            try:
+                tasks = self.executor(TaskDefinition._get_params_from_list(self.actions, params))
+            except KeyError as e:
+                raise KeyError('Invalid parameter name: {} (Task: {})'.format(e, self.name), e)
 
         ##########################################################
 

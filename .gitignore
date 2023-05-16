@@ -7,3 +7,5 @@ __pycache__
 *.drake
 tmp
 dask-worker-space
+build/
+experimenter.egg-info/

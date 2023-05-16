@@ -1,6 +1,5 @@
 from __future__ import absolute_import, division, print_function
 
-import sys
 import argparse
 import logging
 import math
@@ -306,7 +305,7 @@ class RPyCCluster(_base.Executor):
 
         if file is not None:
             with open(file, 'r') as fin:
-                res = yaml.load(fin)
+                res = yaml.safe_load(fin)
         else:
             res = dict()
 

@@ -11,6 +11,7 @@ import signal
 from experimenter.task import TaskPool
 from experimenter import scheduler
 
+
 def getArguments():
     parser = argparse.ArgumentParser()
 
@@ -32,7 +33,7 @@ def getArguments():
     return parser.parse_args()
 
 
-if __name__ == '__main__':
+def main():
     args = getArguments()
     debug = args.debug
     log_level = args.log_level.upper()
@@ -104,3 +105,7 @@ if __name__ == '__main__':
         else:
             print('\033[1m\033[91m'+ str(e) + '\033[0m')
             sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()

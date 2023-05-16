@@ -25,6 +25,7 @@ def getArguments():
     parser.add_argument('-v', '--variables', type=str, default=None, nargs='*', help='Tasks to execute.')
     parser.add_argument('-d', '--dry_run', type=int, default=0, help='Do not run any task if non-zero.')
     parser.add_argument('--force_run', type=int, default=0, help='Force running all tasks even if output exists (combine with dry_run to print commands for full experiment).')
+    parser.add_argument('--summarize', type=int, default=0, help='Print a summary of the tasks. Similar to --dry_run but without the commands to run.')
     parser.add_argument('--wait_for_unfinished', type=int, default=1, help='Wait for unfunished tasks upon exception.')
     parser.add_argument('-c', '--cluster', type=str, default=None, help='Use cluster')
     parser.add_argument('-cp', '--cluster_params', type=str, default=None, nargs='*', help='Cluster parameters separated by semicolon.')
@@ -97,7 +98,10 @@ def main():
         if main is not None:
             task_pool.main = main
 
-        task_pool.execute(dry_run=args.dry_run, force_run=args.force_run)
+        if args.summarize:
+            task_pool.summarize(force_run=args.force_run)
+        else:
+            task_pool.execute(dry_run=args.dry_run, force_run=args.force_run)
 
     except BaseException as e:
         if debug > 0:

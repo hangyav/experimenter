@@ -6,7 +6,9 @@ import logging
 import re
 import os
 import shutil
+import json
 from functools import partial
+from collections import Counter
 
 from experimenter.cluster.rpyc_cluster import GPU, CPU, MEMORY, canonicalize_resources
 
@@ -255,6 +257,13 @@ class TaskInstance:
                     else:
                         os.remove(o)
 
+    def get_all_dependencies(self):
+        res = set(self.dependecies)
+        for dep in self.dependecies:
+            res |= dep.get_all_dependencies()
+
+        return res
+
 
 class TaskPool:
 
@@ -310,7 +319,13 @@ class TaskPool:
             return None
         return found[0]
 
-    def _get_actual_tasks(self, tasks, force_run=False):
+    def _get_actual_tasks(self, tasks=None, force_run=False):
+        if tasks is None:
+            tasks = self.main
+
+            if tasks is None:
+                raise ValueError('No main task is set!')
+
         res = list()
 
         if not isinstance(tasks, list):
@@ -333,12 +348,6 @@ class TaskPool:
         return res
 
     def execute(self, task=None, dry_run=False, force_run=False):
-        if task is None:
-            task = self.main
-
-            if task is None:
-                raise ValueError('No main task is set!')
-
         exec_nodes = list()
         for task in self._get_actual_tasks(task, force_run=force_run):
             if task[0] is not None:
@@ -347,6 +356,16 @@ class TaskPool:
         print('\033[1m\033[91m{}Number of tasks to run: {}\033[0m'.format('# ' if dry_run else '', len(self.task_instances)))
         executor.DRY_RUN = dry_run
         self.scheduler.execute(exec_nodes)
+
+    def summarize(self, tasks=None, force_run=False):
+        task_instances = self._get_actual_tasks(tasks, force_run=force_run)
+        all_task_instances = set()
+        for instance in task_instances:
+            all_task_instances.add(instance[0])
+            all_task_instances |= instance[0].get_all_dependencies()
+
+        counter = Counter(instance.definition.name for instance in all_task_instances)
+        print(json.dumps(counter, indent=4))
 
 
 # FIXME the useage of these methods is not at all elegant
